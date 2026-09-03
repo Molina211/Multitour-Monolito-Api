@@ -136,7 +136,7 @@ vida de un tenant concreto.
 ## Contratos
 
 - `POST /api/tenants`
-  Request: `{ "tenantId": "travesia-natural", "commercialName": "...", "administrator": { "name": "...", "email": "...", "password": "...", "passwordConfirmation": "..." } }`
+  Request: `{ "tenantId": "travesia-natural", "commercialName": "...", "actorId": "...", "administrator": { "name": "...", "email": "...", "password": "...", "passwordConfirmation": "..." } }`
   `201` → `TenantResponse` (tenantId, commercialName, tenantStatus, createdAt).
   `400` → datos faltantes o `password` ≠ `passwordConfirmation`.
   `409` → `tenantId` ya existe.
