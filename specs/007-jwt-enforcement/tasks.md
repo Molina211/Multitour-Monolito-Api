@@ -11,11 +11,11 @@ build/tests/servidor sigue pidiendo permiso cada vez (regla 5) — el batching c
 - [x] T02 — `JwtAuthenticationFilter` + `JwtAuthenticationEntryPoint` (no se registran
   todavía en `SecurityConfig`) · repo: backend · ~20 min · depende de T01
   **— fin lote (T01-T02): commit + push —**
-- [ ] T03 — `TenantMismatchException` (dominio, `reservations`) · repo: backend · ~5 min
-- [ ] T04 — `SecurityConfig`: registra `JwtAuthenticationFilter`, exige autenticación
+- [x] T03 — `TenantMismatchException` (dominio, `reservations`) · repo: backend · ~5 min
+- [x] T04 — `SecurityConfig`: registra `JwtAuthenticationFilter`, exige autenticación
   en `POST /api/tenants/{tenantId}/reservations`, agrega el
   `AuthenticationEntryPoint` para `401` · repo: backend · ~15 min · depende de T02
-- [ ] T05 — `ReservationController.create(...)` toma `customerId` del `Authentication`
+- [x] T05 — `ReservationController.create(...)` toma `customerId` del `Authentication`
   autenticado (no del body), compara `tenantId` del token vs. URL (`403` si no
   coincide vía `TenantMismatchException`); `CreateReservationRequest` pierde
   `customerId` · repo: backend · ~20 min · depende de T03, T04

@@ -1,7 +1,9 @@
 package com.corhuila.errorcapa8.travesia_natural.reservations.infrastructure.in.web;
 
+import com.corhuila.errorcapa8.travesia_natural.common.security.JwtPrincipal;
 import com.corhuila.errorcapa8.travesia_natural.reservations.domain.exception.InvalidReservationException;
 import com.corhuila.errorcapa8.travesia_natural.reservations.domain.exception.ReservationNotFoundException;
+import com.corhuila.errorcapa8.travesia_natural.reservations.domain.exception.TenantMismatchException;
 import com.corhuila.errorcapa8.travesia_natural.reservations.domain.model.Reservation;
 import com.corhuila.errorcapa8.travesia_natural.reservations.domain.model.ReservedService;
 import com.corhuila.errorcapa8.travesia_natural.reservations.domain.port.in.CreateReservationCommand;
@@ -15,6 +17,7 @@ import com.corhuila.errorcapa8.travesia_natural.tenants.domain.exception.TenantI
 import com.corhuila.errorcapa8.travesia_natural.tenants.domain.exception.TenantNotFoundException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -26,6 +29,28 @@ import org.springframework.web.bind.annotation.RestController;
 import java.util.List;
 import java.util.UUID;
 
+/*
+ * ============================================================================================
+ * LEE ESTO ANTES DE CONECTAR EL FRONTEND A `POST .../reservations` (spec 007)
+ * ============================================================================================
+ *
+ * Desde esta spec, crear una reserva EXIGE un header `Authorization: Bearer <token>` con un
+ * JWT emitido por `POST /api/tenants/{tenantId}/login` (spec 004). El `customerId` de la
+ * reserva ya NO se envía en el body: lo toma el Backend del propio token (`sub`), así que
+ * nadie puede crear una reserva a nombre de otro `customerId` con solo conocer su id.
+ *
+ * Esto significa que, tal como está hoy el repo Frontend, es imposible invocar este endpoint
+ * de verdad: `login.component.ts` no guarda el JWT que devuelve el login (lo descarta) ni lo
+ * reenvía en ninguna llamada posterior — el mismo hueco ya documentado en spec 004. Quien
+ * integre Frontend + Backend (persona o IA) necesita:
+ *   1. Guardar el `accessToken` que devuelve el login (spec 004) en algún almacenamiento del
+ *      cliente (ej. memoria de sesión, no necesariamente localStorage).
+ *   2. Reenviarlo como `Authorization: Bearer <token>` en `POST .../reservations`.
+ * Ninguna de las dos cosas se implementa aquí — se documenta para que quede constancia de qué
+ * falta, siguiendo la misma disciplina de las specs 003-006 (documentar el hueco, no
+ * inventarlo ni implementarlo sin una HU de Frontend que lo pida).
+ * ============================================================================================
+ */
 @RestController
 @RequestMapping("/api/tenants/{tenantId}/reservations")
 public class ReservationController {
@@ -41,11 +66,17 @@ public class ReservationController {
 
     @PostMapping
     public ResponseEntity<ReservationResponse> create(@PathVariable String tenantId,
-                                                        @RequestBody CreateReservationRequest request) {
+                                                        @RequestBody CreateReservationRequest request,
+                                                        Authentication authentication) {
+        JwtPrincipal principal = (JwtPrincipal) authentication.getPrincipal();
+        if (!principal.tenantId().equals(tenantId)) {
+            throw new TenantMismatchException();
+        }
+
         List<ReservedService> reservedServices = toDomainReservedServices(request.reservedServices());
 
         CreateReservationCommand command = new CreateReservationCommand(
-                tenantId, request.customerId(), request.projectedValue(), reservedServices);
+                tenantId, principal.membershipId(), request.projectedValue(), reservedServices);
 
         Reservation reservation = createReservationUseCase.createReservation(command);
 
@@ -89,5 +120,10 @@ public class ReservationController {
     @ExceptionHandler(TenantInactiveException.class)
     public ResponseEntity<ErrorResponse> handleTenantInactive(TenantInactiveException ex) {
         return ResponseEntity.status(HttpStatus.CONFLICT).body(new ErrorResponse("tenant_inactive", ex.getMessage()));
+    }
+
+    @ExceptionHandler(TenantMismatchException.class)
+    public ResponseEntity<ErrorResponse> handleTenantMismatch(TenantMismatchException ex) {
+        return ResponseEntity.status(HttpStatus.FORBIDDEN).body(new ErrorResponse("tenant_mismatch", ex.getMessage()));
     }
 }
