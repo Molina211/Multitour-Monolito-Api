@@ -1,9 +1,10 @@
 package com.corhuila.errorcapa8.travesia_natural.reservations.application;
 
+import com.corhuila.errorcapa8.travesia_natural.reservations.domain.exception.InvalidReservationException;
 import com.corhuila.errorcapa8.travesia_natural.reservations.domain.exception.ReservationNotFoundException;
-import com.corhuila.errorcapa8.travesia_natural.reservations.domain.model.PaymentStatus;
 import com.corhuila.errorcapa8.travesia_natural.reservations.domain.model.Reservation;
-import com.corhuila.errorcapa8.travesia_natural.reservations.domain.port.in.ReservationQueryUseCase;
+import com.corhuila.errorcapa8.travesia_natural.reservations.domain.port.in.RegisterPaymentCommand;
+import com.corhuila.errorcapa8.travesia_natural.reservations.domain.port.in.RegisterPaymentUseCase;
 import com.corhuila.errorcapa8.travesia_natural.reservations.domain.port.out.ReservationRepositoryPort;
 import com.corhuila.errorcapa8.travesia_natural.tenants.domain.exception.TenantInactiveException;
 import com.corhuila.errorcapa8.travesia_natural.tenants.domain.exception.TenantNotFoundException;
@@ -12,49 +13,34 @@ import com.corhuila.errorcapa8.travesia_natural.tenants.domain.model.TenantStatu
 import com.corhuila.errorcapa8.travesia_natural.tenants.domain.port.out.TenantRepositoryPort;
 import org.springframework.stereotype.Service;
 
-import java.util.List;
-import java.util.UUID;
-
 @Service
-public class ReservationQueryService implements ReservationQueryUseCase {
+public class RegisterPaymentService implements RegisterPaymentUseCase {
 
     private final TenantRepositoryPort tenantRepositoryPort;
     private final ReservationRepositoryPort reservationRepositoryPort;
 
-    public ReservationQueryService(TenantRepositoryPort tenantRepositoryPort,
-                                    ReservationRepositoryPort reservationRepositoryPort) {
+    public RegisterPaymentService(TenantRepositoryPort tenantRepositoryPort,
+                                   ReservationRepositoryPort reservationRepositoryPort) {
         this.tenantRepositoryPort = tenantRepositoryPort;
         this.reservationRepositoryPort = reservationRepositoryPort;
     }
 
     @Override
-    public Reservation getById(String tenantId, UUID reservationId) {
-        requireTenant(tenantId);
+    public Reservation registerPayment(RegisterPaymentCommand command) {
+        requireActiveTenant(command.tenantId());
 
-        return reservationRepositoryPort.findByTenantIdAndReservationId(tenantId, reservationId)
-                .orElseThrow(() -> new ReservationNotFoundException(reservationId.toString()));
-    }
+        Reservation reservation = reservationRepositoryPort
+                .findByTenantIdAndReservationId(command.tenantId(), command.reservationId())
+                .orElseThrow(() -> new ReservationNotFoundException(command.reservationId().toString()));
 
-    @Override
-    public List<Reservation> listByTenant(String tenantId) {
-        requireTenant(tenantId);
+        Reservation updated = switch (command.method() == null ? "" : command.method()) {
+            case "EFECTIVO" -> reservation.registerCashPayment(command.amount());
+            case "ABONO" -> reservation.registerInstallmentPayment(command.amount());
+            case "TRANSFERENCIA" -> reservation.registerTransferPayment(command.amount(), command.supportReference());
+            default -> throw new InvalidReservationException("unknown payment method: " + command.method());
+        };
 
-        return reservationRepositoryPort.findAllByTenantId(tenantId);
-    }
-
-    @Override
-    public List<Reservation> listPendingSupportByTenant(String tenantId) {
-        requireActiveTenant(tenantId);
-
-        return reservationRepositoryPort.findAllByTenantId(tenantId).stream()
-                .filter(reservation -> reservation.paymentStatus() == PaymentStatus.EN_VALIDACION)
-                .toList();
-    }
-
-    private void requireTenant(String tenantId) {
-        if (!tenantRepositoryPort.existsById(tenantId)) {
-            throw new TenantNotFoundException(tenantId);
-        }
+        return reservationRepositoryPort.save(updated);
     }
 
     private void requireActiveTenant(String tenantId) {

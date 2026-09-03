@@ -1,9 +1,9 @@
 package com.corhuila.errorcapa8.travesia_natural.reservations.application;
 
+import com.corhuila.errorcapa8.travesia_natural.common.audit.AuditRecord;
+import com.corhuila.errorcapa8.travesia_natural.common.audit.AuditRecorder;
 import com.corhuila.errorcapa8.travesia_natural.reservations.domain.exception.ReservationNotFoundException;
-import com.corhuila.errorcapa8.travesia_natural.reservations.domain.model.PaymentStatus;
-import com.corhuila.errorcapa8.travesia_natural.reservations.domain.model.Reservation;
-import com.corhuila.errorcapa8.travesia_natural.reservations.domain.port.in.ReservationQueryUseCase;
+import com.corhuila.errorcapa8.travesia_natural.reservations.domain.port.in.PaymentFollowupQueryUseCase;
 import com.corhuila.errorcapa8.travesia_natural.reservations.domain.port.out.ReservationRepositoryPort;
 import com.corhuila.errorcapa8.travesia_natural.tenants.domain.exception.TenantInactiveException;
 import com.corhuila.errorcapa8.travesia_natural.tenants.domain.exception.TenantNotFoundException;
@@ -12,49 +12,40 @@ import com.corhuila.errorcapa8.travesia_natural.tenants.domain.model.TenantStatu
 import com.corhuila.errorcapa8.travesia_natural.tenants.domain.port.out.TenantRepositoryPort;
 import org.springframework.stereotype.Service;
 
+import java.util.Comparator;
 import java.util.List;
 import java.util.UUID;
 
 @Service
-public class ReservationQueryService implements ReservationQueryUseCase {
+public class PaymentFollowupQueryService implements PaymentFollowupQueryUseCase {
+
+    static final String ACTION = "SEGUIMIENTO_PAGO";
 
     private final TenantRepositoryPort tenantRepositoryPort;
     private final ReservationRepositoryPort reservationRepositoryPort;
+    private final AuditRecorder auditRecorder;
 
-    public ReservationQueryService(TenantRepositoryPort tenantRepositoryPort,
-                                    ReservationRepositoryPort reservationRepositoryPort) {
+    public PaymentFollowupQueryService(TenantRepositoryPort tenantRepositoryPort,
+                                        ReservationRepositoryPort reservationRepositoryPort,
+                                        AuditRecorder auditRecorder) {
         this.tenantRepositoryPort = tenantRepositoryPort;
         this.reservationRepositoryPort = reservationRepositoryPort;
+        this.auditRecorder = auditRecorder;
     }
 
     @Override
-    public Reservation getById(String tenantId, UUID reservationId) {
-        requireTenant(tenantId);
-
-        return reservationRepositoryPort.findByTenantIdAndReservationId(tenantId, reservationId)
-                .orElseThrow(() -> new ReservationNotFoundException(reservationId.toString()));
-    }
-
-    @Override
-    public List<Reservation> listByTenant(String tenantId) {
-        requireTenant(tenantId);
-
-        return reservationRepositoryPort.findAllByTenantId(tenantId);
-    }
-
-    @Override
-    public List<Reservation> listPendingSupportByTenant(String tenantId) {
+    public List<AuditRecord> listFollowups(String tenantId, UUID reservationId) {
         requireActiveTenant(tenantId);
 
-        return reservationRepositoryPort.findAllByTenantId(tenantId).stream()
-                .filter(reservation -> reservation.paymentStatus() == PaymentStatus.EN_VALIDACION)
-                .toList();
-    }
+        reservationRepositoryPort.findByTenantIdAndReservationId(tenantId, reservationId)
+                .orElseThrow(() -> new ReservationNotFoundException(reservationId.toString()));
 
-    private void requireTenant(String tenantId) {
-        if (!tenantRepositoryPort.existsById(tenantId)) {
-            throw new TenantNotFoundException(tenantId);
-        }
+        return auditRecorder.findAll().stream()
+                .filter(record -> ACTION.equals(record.action()))
+                .filter(record -> tenantId.equals(record.tenantId()))
+                .filter(record -> reservationId.toString().equals(record.affectedRecordId()))
+                .sorted(Comparator.comparing(AuditRecord::recordedAt))
+                .toList();
     }
 
     private void requireActiveTenant(String tenantId) {
