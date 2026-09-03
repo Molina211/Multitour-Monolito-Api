@@ -14,7 +14,7 @@ lotes de 2-3 tareas, commit + push sin pedir permiso en cada uno, siempre que
 - [x] T06 — `RegisterCustomerService`: busca el tenant (404 si no existe), rechaza tenant `Inactivo` (409 vía `TenantInactiveException`), valida `PasswordPolicy`, rechaza email duplicado en el tenant (409 vía `EmailAlreadyRegisteredException`), hashea con el `PasswordEncoder` existente, arma `Membership.createEndCustomer` y persiste · repo: backend · ~25 min · depende de T03, T04, T05
 - [x] T07 — `CustomerController` (`POST /api/tenants/{tenantId}/customers`), DTOs `RegisterCustomerRequest`/`CustomerResponse` (sin `passwordHash`), valida `password == passwordConfirmation` antes de construir el comando, mapea excepciones a 400/404/409 · repo: backend · ~25 min · depende de T06
   **— fin lote 3 (T06-T07): commit + push —**
-- [ ] T08 — Agrega la sección "003 — End customer registration" a `PLAN-VERIFICACION.md` con los `curl`/`psql` de cada criterio de aceptación · repo: backend · ~20 min · depende de T07
-- [ ] T09 — Verifica que el contexto de Spring levanta y que `./mvnw test` sigue en verde (spec 001 + 002 + 003) · repo: backend · ~15 min · depende de T07
-- [ ] T10 — Verifica los criterios de aceptación de `spec.md` ejecutando la sección nueva de `PLAN-VERIFICACION.md` de punta a punta · repo: backend · ~25 min · depende de T08, T09
+- [x] T08 — Agrega la sección "003 — End customer registration" a `PLAN-VERIFICACION.md` con los `curl`/`psql` de cada criterio de aceptación · repo: backend · ~20 min · depende de T07
+- [x] T09 — Verifica que el contexto de Spring levanta y que `./mvnw test` sigue en verde (spec 001 + 002 + 003) · repo: backend · ~15 min · depende de T07
+- [x] T10 — Verifica los criterios de aceptación de `spec.md` ejecutando la sección nueva de `PLAN-VERIFICACION.md` de punta a punta · repo: backend · ~25 min · depende de T08, T09
   **— fin lote 4 (T08-T10): commit + push —**

@@ -225,3 +225,112 @@ Se espera `200 OK` con un array que incluye `travesia-natural`.
 ```
 
 Deben seguir en verde `contextLoads` y los tests de spec 001, sin regresiones.
+
+---
+
+# Plan de verificación — 003 End customer registration
+
+Corresponde a `specs/003-end-customer-registration/`. Requiere la app corriendo (paso 4
+de la primera sección) y Postgres arriba (paso 1). Reutiliza el tenant
+`travesia-natural` creado en la sección "002 — Tenant lifecycle" (si no existe,
+repetir el paso 2 de esa sección primero).
+
+## 1. Verificar el esquema V3
+
+```bash
+docker exec -it multitour-postgres psql -U multitour -d multitour -c "\d memberships"
+```
+
+Se esperan las columnas nuevas `first_name`, `last_name`, `phone` y el índice único
+`uq_memberships_tenant_email`, además de `flyway_schema_history` mostrando `V3`
+aplicada.
+
+## 2. Registrar un End Customer
+
+```bash
+curl -i -X POST http://localhost:8080/api/tenants/travesia-natural/customers \
+  -H "Content-Type: application/json" \
+  -d '{
+        "firstName": "Laura",
+        "lastName": "Gomez",
+        "email": "laura.gomez@example.com",
+        "phone": "3001234567",
+        "password": "Cliente123!",
+        "passwordConfirmation": "Cliente123!"
+      }'
+```
+
+Se espera `201 Created` con `role: "END_CUSTOMER"` y `membershipStatus: "ACTIVA"`.
+Confirmar que la contraseña quedó hasheada:
+
+```bash
+docker exec -it multitour-postgres psql -U multitour -d multitour -c "SELECT tenant_id, email, first_name, last_name, phone, role, password_hash FROM memberships WHERE email = 'laura.gomez@example.com';"
+```
+
+`password_hash` debe empezar con `$2a$` o `$2b$`, nunca `Cliente123!` literal.
+
+## 3. Rechazo por email duplicado en el mismo tenant
+
+Repetir el `curl` del paso 2 exactamente igual. Se espera `409 Conflict` y que
+`SELECT count(*) FROM memberships WHERE tenant_id = 'travesia-natural' AND email =
+'laura.gomez@example.com';` siga devolviendo `1`.
+
+## 4. El mismo email en otro tenant sí se permite
+
+Crear un segundo tenant (por ejemplo `otro-tenant`, con el paso 2 de la sección "002 —
+Tenant lifecycle") y repetir el `curl` del paso 2 de esta sección apuntando a
+`/api/tenants/otro-tenant/customers` con el mismo email. Se espera `201 Created`, y la
+consulta `psql` debe mostrar dos filas con el mismo email y `tenant_id` distinto, sin
+relación cruzada entre ellas.
+
+## 5. Rechazo por contraseñas que no coinciden
+
+```bash
+curl -i -X POST http://localhost:8080/api/tenants/travesia-natural/customers \
+  -H "Content-Type: application/json" \
+  -d '{
+        "firstName": "Carlos",
+        "lastName": "Ruiz",
+        "email": "carlos.ruiz@example.com",
+        "password": "Uno123!",
+        "passwordConfirmation": "Distinta456!"
+      }'
+```
+
+Se espera `400 Bad Request` y que `carlos.ruiz@example.com` no quede creado.
+
+## 6. Rechazo por política de contraseña incumplida
+
+Repetir el `curl` del paso 2 con un email nuevo y `"password": "corta1", "passwordConfirmation": "corta1"`
+(sin mayúscula ni carácter especial). Se espera `400 Bad Request` sin persistir nada.
+
+## 7. Rechazo por tenant inexistente
+
+```bash
+curl -i -X POST http://localhost:8080/api/tenants/no-existe/customers \
+  -H "Content-Type: application/json" \
+  -d '{
+        "firstName": "Ana",
+        "lastName": "Diaz",
+        "email": "ana.diaz@example.com",
+        "password": "Cliente123!",
+        "passwordConfirmation": "Cliente123!"
+      }'
+```
+
+Se espera `404 Not Found`.
+
+## 8. Rechazo por tenant `Inactivo`
+
+Desactivar `travesia-natural` (paso 5 de la sección "002 — Tenant lifecycle") y
+repetir el `curl` del paso 2 de esta sección con un email nuevo. Se espera `409
+Conflict` sin persistir nada. Reactivar el tenant al terminar (paso 6 de esa sección)
+para no dejar el ambiente en un estado inconsistente para pruebas futuras.
+
+## 9. Compilación y tests (spec 001 + spec 002 + spec 003)
+
+```bash
+./mvnw test
+```
+
+Deben seguir en verde `contextLoads` y los tests existentes, sin regresiones.

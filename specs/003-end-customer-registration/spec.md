@@ -1,6 +1,6 @@
 # 003 — Registro de End Customer
 
-**Estado:** APROBADA
+**Estado:** TERMINADA
 **Fecha:** 2026-09-02
 **Repos afectados:** backend
 **HU relacionada:** HU-IAM-001 (principal, FR-016). Depende de HU-TEN-001 (spec 002,
@@ -45,20 +45,20 @@ cliente autenticado (dependientes de HU-IAM-002) tampoco pueden avanzar.
 
 ## Criterios de aceptación
 
-- [ ] `POST /api/tenants/{tenantId}/customers` con `firstName`, `lastName`, `email`,
+- [x] `POST /api/tenants/{tenantId}/customers` con `firstName`, `lastName`, `email`,
       `password` y `passwordConfirmation` iguales, sobre un tenant `Activo`, devuelve
       `201 Created` con la membresía en `role: END_CUSTOMER`, `membershipStatus:
       ACTIVA`, contraseña hasheada (nunca en texto plano).
-- [ ] Repetir el mismo email dentro del mismo tenant devuelve `409` sin crear una
+- [x] Repetir el mismo email dentro del mismo tenant devuelve `409` sin crear una
       membresía duplicada.
-- [ ] El mismo email usado en un tenant distinto sí permite crear una membresía
+- [x] El mismo email usado en un tenant distinto sí permite crear una membresía
       independiente, sin relación cruzada entre ambas.
-- [ ] `password` distinto de `passwordConfirmation` devuelve `400` sin persistir nada.
-- [ ] Una contraseña que no cumple la política (longitud, mayúscula, minúscula,
+- [x] `password` distinto de `passwordConfirmation` devuelve `400` sin persistir nada.
+- [x] Una contraseña que no cumple la política (longitud, mayúscula, minúscula,
       número, carácter especial) devuelve `400` sin persistir nada.
-- [ ] Registrar sobre un `tenantId` inexistente devuelve `404`.
-- [ ] Registrar sobre un tenant `Inactivo` devuelve `409`/`400` sin crear la membresía.
-- [ ] El proyecto compila y los tests existentes (spec 001 y 002) siguen pasando.
+- [x] Registrar sobre un `tenantId` inexistente devuelve `404`.
+- [x] Registrar sobre un tenant `Inactivo` devuelve `409`/`400` sin crear la membresía.
+- [x] El proyecto compila y los tests existentes (spec 001 y 002) siguen pasando.
 
 ## Impacto en multitenencia
 
