@@ -8,16 +8,16 @@ explícita del usuario del 2026-09-03). La ejecución de build/tests/servidor si
 pidiendo permiso cada vez (regla 5) — el batching cubre `commit`/`push`, no la
 ejecución local.
 
-- [ ] T01 — `Discount` (agregado) + `DiscountBase` (enum) + `InvalidDiscountException` +
+- [x] T01 — `Discount` (agregado) + `DiscountBase` (enum) + `InvalidDiscountException` +
   `DiscountNotFoundException` · repo: backend · ~25 min
-- [ ] T02 — `V6__create_discounts.sql` + `DiscountEntity` + `DiscountJpaRepository` +
+- [x] T02 — `V6__create_discounts.sql` + `DiscountEntity` + `DiscountJpaRepository` +
   `DiscountRepositoryAdapter` + `DiscountRepositoryPort` · repo: backend · ~25 min ·
   depende de T01
   **— fin lote (T01-T02): commit + push —**
-- [ ] T03 — `CreateDiscountCommand`/`CreateDiscountUseCase`/`CreateDiscountService`
+- [x] T03 — `CreateDiscountCommand`/`CreateDiscountUseCase`/`CreateDiscountService`
   (valida tenant existe/activo vía `TenantRepositoryPort`, y `catalogItemId` existe en
   ese tenant vía `CatalogItemRepositoryPort`) · repo: backend · ~20 min · depende de T02
-- [ ] T04 — `DiscountQueryUseCase`/`DiscountQueryService` (listByTenant, getById) +
+- [x] T04 — `DiscountQueryUseCase`/`DiscountQueryService` (listByTenant, getById) +
   `DiscountController` (`POST`, `GET` lista, `GET` por id) + `DiscountRequest`/
   `DiscountResponse` + `@ExceptionHandler` (400/404/409, reutilizando excepciones de
   `tenants`/`catalog`) · repo: backend · ~30 min · depende de T03
