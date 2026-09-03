@@ -10,4 +10,6 @@ public interface ReservationQueryUseCase {
     Reservation getById(String tenantId, UUID reservationId);
 
     List<Reservation> listByTenant(String tenantId);
+
+    List<Reservation> listPendingSupportByTenant(String tenantId);
 }

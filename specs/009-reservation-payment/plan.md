@@ -107,10 +107,12 @@ No se toca `audit_records` (spec 002 ya tiene `action`, `reason`, `actor_id`,
 Todos bajo `/api/tenants/{tenantId}/reservations/{reservationId}` salvo el listado.
 
 - `POST .../payments` — body `{ "method": "EFECTIVO"|"ABONO"|"TRANSFERENCIA", "amount":
-  number, "supportReference": string (solo TRANSFERENCIA), "actorId": string }` →
-  `200` con la reserva actualizada. `400` si el monto no aplica (efectivo insuficiente,
-  monto ≤ 0, falta `supportReference` en transferencia). `409` si ya hay una
-  transferencia en validación y se intenta registrar otra.
+  number, "supportReference": string (solo TRANSFERENCIA) }` → `200` con la reserva
+  actualizada. `400` si el monto no aplica (efectivo insuficiente, monto ≤ 0, falta
+  `supportReference` en transferencia, o `method` desconocido). `409` si ya hay una
+  transferencia en validación y se intenta registrar otra. Sin `actorId`: ningún
+  criterio de aceptación audita el registro del pago en sí (solo la decisión de
+  soporte y el seguimiento lo hacen), así que no se pide un dato que no se usaría.
 - `POST .../payments/decide-support` — body `{ "decision": "APPROVE"|"REJECT",
   "reason": string, "actorId": string }` → `200` con la reserva actualizada. `400` sin
   `reason`. `409` si no hay ninguna transferencia pendiente de decidir.

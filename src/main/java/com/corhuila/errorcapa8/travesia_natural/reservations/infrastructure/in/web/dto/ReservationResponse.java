@@ -11,7 +11,8 @@ public record ReservationResponse(UUID reservationId, String tenantId, String cu
                                    List<ReservedServiceResponse> reservedServices, BigDecimal projectedValue,
                                    BigDecimal finalValue, BigDecimal pendingBalance, BigDecimal creditBalance,
                                    String reservationStatus, String paymentStatus, String paymentMethod,
-                                   Instant createdAt) {
+                                   Instant createdAt, BigDecimal pendingTransferAmount,
+                                   String transferSupportReference) {
 
     public static ReservationResponse from(Reservation reservation) {
         return new ReservationResponse(
@@ -26,6 +27,8 @@ public record ReservationResponse(UUID reservationId, String tenantId, String cu
                 reservation.reservationStatus().label(),
                 reservation.paymentStatus().label(),
                 reservation.paymentMethod(),
-                reservation.createdAt());
+                reservation.createdAt(),
+                reservation.pendingTransferAmount(),
+                reservation.transferSupportReference());
     }
 }
