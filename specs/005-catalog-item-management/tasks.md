@@ -11,8 +11,8 @@ lotes de 2-3 tareas, commit + push sin pedir permiso en cada uno, siempre que
 - [x] T04 — Puertos de entrada (`CreateCatalogItemCommand/UseCase`, `UpdateCatalogItemCommand/UseCase`, `DeactivateCatalogItemUseCase`, `ReactivateCatalogItemUseCase`, `CatalogItemQueryUseCase`) y de salida (`CatalogItemRepositoryPort`) · repo: backend · ~20 min · depende de T02, T03
 - [x] T05 — `CatalogItemEntity`, `CatalogItemJpaRepository`, `CatalogItemRepositoryAdapter` (mapeo hacia/desde el dominio vía `CatalogItem.reconstitute`) · repo: backend · ~20 min · depende de T04
   **— fin lote 2 (T04-T05): commit + push —**
-- [ ] T06 — `CreateCatalogItemService` y `CatalogItemQueryService` (resuelven tenant vía `TenantRepositoryPort`, rechazan tenant inexistente/`Inactivo` igual que `RegisterCustomerService`) · repo: backend · ~20 min · depende de T05
-- [ ] T07 — `UpdateCatalogItemService`, `DeactivateCatalogItemService`, `ReactivateCatalogItemService` · repo: backend · ~20 min · depende de T06
+- [x] T06 — `CreateCatalogItemService` y `CatalogItemQueryService` (resuelven tenant vía `TenantRepositoryPort`, rechazan tenant inexistente/`Inactivo` igual que `RegisterCustomerService`) · repo: backend · ~20 min · depende de T05
+- [x] T07 — `UpdateCatalogItemService`, `DeactivateCatalogItemService`, `ReactivateCatalogItemService` · repo: backend · ~20 min · depende de T06
   **— fin lote 3 (T06-T07): commit + push —**
 - [ ] T08 — `CatalogItemController` (`POST/GET/PATCH` + `/deactivate`/`/reactivate` bajo `/api/tenants/{tenantId}/catalog-items`), DTOs `CatalogItemRequest`/`CatalogItemPatchRequest`/`CatalogItemResponse`, manejadores de excepción (`400`/`404`/`409`) · repo: backend · ~30 min · depende de T07
   **— fin lote 4 (T08): commit + push —**
