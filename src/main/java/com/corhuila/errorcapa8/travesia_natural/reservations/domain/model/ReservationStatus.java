@@ -16,4 +16,13 @@ public enum ReservationStatus {
     public String label() {
         return label;
     }
+
+    public static ReservationStatus fromLabel(String label) {
+        for (ReservationStatus status : values()) {
+            if (status.label.equals(label)) {
+                return status;
+            }
+        }
+        throw new IllegalArgumentException("Unknown ReservationStatus label: " + label);
+    }
 }

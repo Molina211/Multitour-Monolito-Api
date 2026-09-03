@@ -18,4 +18,13 @@ public enum PaymentStatus {
     public String label() {
         return label;
     }
+
+    public static PaymentStatus fromLabel(String label) {
+        for (PaymentStatus status : values()) {
+            if (status.label.equals(label)) {
+                return status;
+            }
+        }
+        throw new IllegalArgumentException("Unknown PaymentStatus label: " + label);
+    }
 }
