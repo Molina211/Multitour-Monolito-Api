@@ -84,6 +84,19 @@ Solo backend.
   prueba de identidad); construir el `Authentication` directamente desde los claims ya
   parseados es el patrón estándar para JWT stateless en Spring Security, evita una
   consulta a `memberships` por cada request.
+- **El chequeo de `tenantId` del token va antes del chequeo de existencia del tenant
+  (spec 006), no después**: como consecuencia, para un `{tenantId}` en la URL distinto
+  al del token, la respuesta siempre es `403` (mismatch), nunca llega a preguntarle a
+  `CreateReservationService` si ese tenant existe. En la práctica esto vuelve
+  inalcanzable el `404` de "tenant inexistente" documentado en spec 006 **a través de
+  este endpoint específico**: para tener un JWT válido hay que haber iniciado sesión en
+  un tenant que existía en ese momento (spec 004 ya rechaza el login contra un tenant
+  inexistente), así que la URL solo puede "no coincidir" con un tenant real (mismatch,
+  `403`) o coincidir con el propio tenant del token (que por definición existe). El único
+  caso de spec 006 que sigue siendo alcanzable aquí es el `409` de tenant `Inactivo`:
+  el token se emitió cuando el tenant estaba `Activo` y se desactiva después, antes de
+  que el token expire. Se documenta como consecuencia intencional (evita revelar si un
+  tenant ajeno existe, mismo criterio que el `401` genérico de spec 004), no como bug.
 
 ## Contratos
 

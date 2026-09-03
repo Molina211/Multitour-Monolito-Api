@@ -568,6 +568,12 @@ riesgo 1). Cualquier reserva creada antes de esta migración (por ejemplo, en la
 "001") se pierde al aplicar `V5`. Es un costo aceptado de datos de prueba, no de
 producción.
 
+**Nota (spec 007):** desde spec 007, `POST .../reservations` exige un header
+`Authorization: Bearer <token>` y ya no acepta `customerId` en el body. Los `curl` de
+los pasos 2 y 4 de esta sección quedaron desactualizados por eso — ver la sección "007"
+más abajo para la versión vigente con autenticación. Los pasos 1, 3, 5, 6, 7 y 8 de esta
+sección no cambian.
+
 ## 1. Arrancar la aplicación y confirmar la migración V5
 
 ```bash
@@ -650,6 +656,108 @@ curl -i http://localhost:8080/api/tenants/travesia-natural/reservations/<reserva
 Se espera `404 Not Found` (no filtra existencia cruzada).
 
 ## 8. Compilación y tests (spec 001 + spec 002 + spec 003 + spec 004 + spec 005 + spec 006)
+
+```bash
+./mvnw test
+```
+
+Deben seguir en verde `contextLoads` y los tests existentes, sin regresiones.
+
+---
+
+# Plan de verificación — 007 Enforcement de JWT en creación de reservas
+
+Corresponde a `specs/007-jwt-enforcement/`. Requiere Postgres arriba (paso 1), la app
+corriendo (paso 4 de la primera sección), el tenant `travesia-natural` `Activo`, y el
+cliente `laura.gomez@example.com` / `Cliente123!` (creado en la sección "003").
+
+**Nota:** `login.component.ts` del Frontend no guarda el JWT ni lo reenvía en llamadas
+posteriores (mismo hueco documentado en spec 004 y en el comentario extenso de
+`ReservationController.java`) — esta verificación obtiene el token a mano con `curl` y
+lo reenvía manualmente, no hay integración real con el Frontend todavía.
+
+## 1. Obtener un token válido
+
+```bash
+curl -s -X POST http://localhost:8080/api/tenants/travesia-natural/login \
+  -H "Content-Type: application/json" \
+  -d '{ "email": "laura.gomez@example.com", "password": "Cliente123!" }'
+```
+
+Guardar el `accessToken` de la respuesta en una variable para los pasos siguientes:
+
+```bash
+TOKEN="<accessToken del paso anterior>"
+```
+
+## 2. Crear una reserva sin header `Authorization` (`401`)
+
+```bash
+curl -i -X POST http://localhost:8080/api/tenants/travesia-natural/reservations \
+  -H "Content-Type: application/json" \
+  -d '{ "projectedValue": 300000, "reservedServices": [{ "serviceReference": "tour-laguna-verde" }] }'
+```
+
+Se espera `401 Unauthorized` con `{"error":"unauthorized", ...}`.
+
+## 3. Crear una reserva con un token con firma alterada (`401`)
+
+```bash
+curl -i -X POST http://localhost:8080/api/tenants/travesia-natural/reservations \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer ${TOKEN}x" \
+  -d '{ "projectedValue": 300000, "reservedServices": [{ "serviceReference": "tour-laguna-verde" }] }'
+```
+
+Se espera `401 Unauthorized` (firma inválida al alterar un carácter del token).
+
+## 4. Crear una reserva con un token válido de otro tenant (`403`)
+
+Requiere un segundo tenant `Activo` con su propio Administrator/Membership (por ejemplo,
+uno creado en la sección "002"), y un login exitoso contra ese otro tenant para obtener
+un segundo token. Con ese segundo token, llamar a la URL de `travesia-natural`:
+
+```bash
+curl -i -X POST http://localhost:8080/api/tenants/travesia-natural/reservations \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer <token-del-otro-tenant>" \
+  -d '{ "projectedValue": 300000, "reservedServices": [{ "serviceReference": "tour-laguna-verde" }] }'
+```
+
+Se espera `403 Forbidden` con `{"error":"tenant_mismatch", ...}`. Nota: por el mismo
+motivo, este endpoint ya no puede usarse para comprobar el `404` de "tenant inexistente"
+de spec 006 — ver `plan.md`, "Decisiones técnicas".
+
+## 5. Crear una reserva con un token válido del mismo tenant (`201`, `customerId` del token)
+
+```bash
+curl -i -X POST http://localhost:8080/api/tenants/travesia-natural/reservations \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer ${TOKEN}" \
+  -d '{ "projectedValue": 300000, "reservedServices": [{ "serviceReference": "tour-laguna-verde", "partySize": 2, "scheduledDate": "2026-10-15" }] }'
+```
+
+Se espera `201 Created`. El `customerId` de la respuesta debe ser igual al `membershipId`
+(claim `sub`) de `laura.gomez@example.com` decodificado del token del paso 1 — nunca un
+valor inventado, porque el body ya no lleva `customerId`.
+
+## 6. Tenant `Inactivo` con un token emitido antes de desactivarlo (`409`)
+
+Con el mismo `TOKEN` del paso 1 (emitido cuando `travesia-natural` estaba `Activo`),
+desactivar el tenant (paso 5 de la sección "002") y repetir el `curl` del paso 5 de esta
+sección: se espera `409 Conflict` con `{"error":"tenant_inactive", ...}`. Reactivar el
+tenant al terminar (paso 6 de esa sección).
+
+## 7. Control: un endpoint no protegido sigue respondiendo igual sin token
+
+```bash
+curl -i http://localhost:8080/api/tenants
+```
+
+Se espera `200 OK`, igual que antes de esta spec — confirma que el resto de la API no
+quedó bloqueada por el nuevo filtro.
+
+## 8. Compilación y tests (spec 001 + spec 002 + spec 003 + spec 004 + spec 005 + spec 006 + spec 007)
 
 ```bash
 ./mvnw test

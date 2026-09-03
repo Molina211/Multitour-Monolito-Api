@@ -20,9 +20,9 @@ build/tests/servidor sigue pidiendo permiso cada vez (regla 5) — el batching c
   coincide vía `TenantMismatchException`); `CreateReservationRequest` pierde
   `customerId` · repo: backend · ~20 min · depende de T03, T04
   **— fin lote (T03-T05): commit + push —**
-- [ ] T06 — Agrega la sección "007 — Enforcement de JWT" a `PLAN-VERIFICACION.md` con
+- [x] T06 — Agrega la sección "007 — Enforcement de JWT" a `PLAN-VERIFICACION.md` con
   los `curl` de cada criterio de aceptación · repo: backend · ~15 min · depende de T05
-- [ ] T07 — Verifica que `./mvnw test` sigue en verde y ejecuta la sección nueva de
+- [x] T07 — Verifica que `./mvnw test` sigue en verde y ejecuta la sección nueva de
   `PLAN-VERIFICACION.md` de punta a punta contra el servidor local (pide permiso antes
   de correr build/tests/servidor, regla 5) · repo: backend · ~20 min · depende de T06
   **— fin lote (T06-T07): commit + push —**

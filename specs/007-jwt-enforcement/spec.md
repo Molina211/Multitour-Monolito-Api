@@ -1,6 +1,6 @@
 # 007 — Enforcement de JWT en creación de reservas
 
-**Estado:** APROBADA
+**Estado:** TERMINADA
 **Fecha:** 2026-09-03
 **Repos afectados:** backend
 **HU relacionada:** Cierra el hueco de seguridad dejado abierto por HU-IAM-002 (spec
@@ -67,19 +67,19 @@ que queda completamente abierto pese a que ya existe un mecanismo de login real.
 
 ## Criterios de aceptación
 
-- [ ] `POST /api/tenants/{tenantId}/reservations` sin header `Authorization` devuelve
+- [x] `POST /api/tenants/{tenantId}/reservations` sin header `Authorization` devuelve
       `401`.
-- [ ] `POST /api/tenants/{tenantId}/reservations` con un JWT expirado o con firma
+- [x] `POST /api/tenants/{tenantId}/reservations` con un JWT expirado o con firma
       inválida devuelve `401`.
-- [ ] `POST /api/tenants/{tenantId}/reservations` con un JWT válido pero cuyo claim
+- [x] `POST /api/tenants/{tenantId}/reservations` con un JWT válido pero cuyo claim
       `tenantId` no coincide con el `{tenantId}` de la URL devuelve `403`.
-- [ ] `POST /api/tenants/{tenantId}/reservations` con un JWT válido del mismo tenant
+- [x] `POST /api/tenants/{tenantId}/reservations` con un JWT válido del mismo tenant
       crea la reserva con `customerId` igual al `sub` (membershipId) del token, sin
       importar qué venga o no en el body.
-- [ ] El resto de endpoints existentes (`tenants`, `customers`, `login`,
+- [x] El resto de endpoints existentes (`tenants`, `customers`, `login`,
       `catalog-items`, `GET`/lecturas de `reservations`, `/api/audit`) siguen
       respondiendo igual que antes (sin exigir autenticación).
-- [ ] El proyecto compila y los tests existentes (specs 001-006) siguen pasando.
+- [x] El proyecto compila y los tests existentes (specs 001-006) siguen pasando.
 
 ## Impacto en multitenencia
 
