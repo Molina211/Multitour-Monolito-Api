@@ -5,8 +5,8 @@ import com.corhuila.errorcapa8.travesia_natural.reservations.domain.model.Reserv
 import com.corhuila.errorcapa8.travesia_natural.reservations.domain.model.ReservedService;
 import com.corhuila.errorcapa8.travesia_natural.reservations.domain.port.in.CreateReservationCommand;
 import com.corhuila.errorcapa8.travesia_natural.reservations.domain.port.in.CreateReservationUseCase;
+import com.corhuila.errorcapa8.travesia_natural.common.web.dto.ErrorResponse;
 import com.corhuila.errorcapa8.travesia_natural.reservations.infrastructure.in.web.dto.CreateReservationRequest;
-import com.corhuila.errorcapa8.travesia_natural.reservations.infrastructure.in.web.dto.ErrorResponse;
 import com.corhuila.errorcapa8.travesia_natural.reservations.infrastructure.in.web.dto.ReservationResponse;
 import com.corhuila.errorcapa8.travesia_natural.reservations.infrastructure.in.web.dto.ReservedServiceRequest;
 import org.springframework.http.HttpStatus;
