@@ -51,6 +51,12 @@ public class ReservationEntity {
     @Column(name = "created_at", nullable = false)
     private Instant createdAt;
 
+    @Column(name = "pending_transfer_amount")
+    private BigDecimal pendingTransferAmount;
+
+    @Column(name = "transfer_support_reference")
+    private String transferSupportReference;
+
     @OneToMany(mappedBy = "reservation", cascade = CascadeType.ALL, orphanRemoval = true)
     private List<ReservedServiceEntity> reservedServices = new ArrayList<>();
 
@@ -61,7 +67,7 @@ public class ReservationEntity {
     public ReservationEntity(UUID reservationId, String tenantId, String customerId, BigDecimal projectedValue,
                               BigDecimal finalValue, BigDecimal pendingBalance, BigDecimal creditBalance,
                               String reservationStatus, String paymentStatus, String paymentMethod,
-                              Instant createdAt) {
+                              Instant createdAt, BigDecimal pendingTransferAmount, String transferSupportReference) {
         this.reservationId = reservationId;
         this.tenantId = tenantId;
         this.customerId = customerId;
@@ -73,6 +79,8 @@ public class ReservationEntity {
         this.paymentStatus = paymentStatus;
         this.paymentMethod = paymentMethod;
         this.createdAt = createdAt;
+        this.pendingTransferAmount = pendingTransferAmount;
+        this.transferSupportReference = transferSupportReference;
     }
 
     public void addReservedService(ReservedServiceEntity reservedService) {
@@ -122,6 +130,14 @@ public class ReservationEntity {
 
     public Instant getCreatedAt() {
         return createdAt;
+    }
+
+    public BigDecimal getPendingTransferAmount() {
+        return pendingTransferAmount;
+    }
+
+    public String getTransferSupportReference() {
+        return transferSupportReference;
     }
 
     public List<ReservedServiceEntity> getReservedServices() {

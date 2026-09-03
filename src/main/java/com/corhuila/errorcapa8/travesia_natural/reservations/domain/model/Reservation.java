@@ -1,6 +1,7 @@
 package com.corhuila.errorcapa8.travesia_natural.reservations.domain.model;
 
 import com.corhuila.errorcapa8.travesia_natural.reservations.domain.exception.InvalidReservationException;
+import com.corhuila.errorcapa8.travesia_natural.reservations.domain.exception.PaymentAlreadyResolvedException;
 
 import java.math.BigDecimal;
 import java.time.Instant;
@@ -26,12 +27,15 @@ public final class Reservation {
     private final PaymentStatus paymentStatus;
     private final String paymentMethod;
     private final Instant createdAt;
+    private final BigDecimal pendingTransferAmount;
+    private final String transferSupportReference;
 
     private Reservation(UUID reservationId, String tenantId, String customerId,
                          List<ReservedService> reservedServices, BigDecimal projectedValue,
                          BigDecimal finalValue, BigDecimal pendingBalance, BigDecimal creditBalance,
                          ReservationStatus reservationStatus, PaymentStatus paymentStatus,
-                         String paymentMethod, Instant createdAt) {
+                         String paymentMethod, Instant createdAt, BigDecimal pendingTransferAmount,
+                         String transferSupportReference) {
         this.reservationId = reservationId;
         this.tenantId = tenantId;
         this.customerId = customerId;
@@ -44,6 +48,8 @@ public final class Reservation {
         this.paymentStatus = paymentStatus;
         this.paymentMethod = paymentMethod;
         this.createdAt = createdAt;
+        this.pendingTransferAmount = pendingTransferAmount;
+        this.transferSupportReference = transferSupportReference;
     }
 
     /**
@@ -78,7 +84,9 @@ public final class Reservation {
                 ReservationStatus.PENDIENTE_DE_PAGO,
                 PaymentStatus.SIN_PAGO,
                 null,
-                Instant.now());
+                Instant.now(),
+                null,
+                null);
     }
 
     /**
@@ -89,9 +97,98 @@ public final class Reservation {
                                             List<ReservedService> reservedServices, BigDecimal projectedValue,
                                             BigDecimal finalValue, BigDecimal pendingBalance,
                                             BigDecimal creditBalance, ReservationStatus reservationStatus,
-                                            PaymentStatus paymentStatus, String paymentMethod, Instant createdAt) {
+                                            PaymentStatus paymentStatus, String paymentMethod, Instant createdAt,
+                                            BigDecimal pendingTransferAmount, String transferSupportReference) {
         return new Reservation(reservationId, tenantId, customerId, reservedServices, projectedValue, finalValue,
-                pendingBalance, creditBalance, reservationStatus, paymentStatus, paymentMethod, createdAt);
+                pendingBalance, creditBalance, reservationStatus, paymentStatus, paymentMethod, createdAt,
+                pendingTransferAmount, transferSupportReference);
+    }
+
+    /**
+     * Registra un pago en efectivo (spec 009): debe cubrir exactamente o superar el
+     * saldo pendiente en una sola operación; un monto insuficiente se rechaza en vez de
+     * aceptarse como abono parcial (esa es la modalidad Abono, no Efectivo).
+     */
+    public Reservation registerCashPayment(BigDecimal amount) {
+        validatePaymentAmount(amount);
+        if (amount.compareTo(pendingBalance) < 0) {
+            throw new InvalidReservationException(
+                    "cash payment must cover the full pending balance; use an installment (Abono) for partial payments");
+        }
+        return new Reservation(reservationId, tenantId, customerId, reservedServices, projectedValue, finalValue,
+                BigDecimal.ZERO, creditBalance, ReservationStatus.CONFIRMADA, PaymentStatus.PAGADO, "Efectivo",
+                createdAt, null, null);
+    }
+
+    /**
+     * Registra un abono (spec 009): puede ser parcial. Si el saldo llega a cero, la
+     * reserva queda confirmada igual que un pago en efectivo completo.
+     */
+    public Reservation registerInstallmentPayment(BigDecimal amount) {
+        validatePaymentAmount(amount);
+        BigDecimal newPendingBalance = pendingBalance.subtract(amount);
+        if (newPendingBalance.signum() < 0) {
+            newPendingBalance = BigDecimal.ZERO;
+        }
+        boolean settled = newPendingBalance.signum() == 0;
+        return new Reservation(reservationId, tenantId, customerId, reservedServices, projectedValue, finalValue,
+                newPendingBalance, creditBalance,
+                settled ? ReservationStatus.CONFIRMADA : reservationStatus,
+                settled ? PaymentStatus.PAGADO : PaymentStatus.PARCIAL,
+                "Abono", createdAt, null, null);
+    }
+
+    /**
+     * Registra una transferencia con soporte (spec 009): no aplica el monto todavía,
+     * queda a la espera de una decisión explícita (aprobar/rechazar).
+     */
+    public Reservation registerTransferPayment(BigDecimal amount, String supportReference) {
+        validatePaymentAmount(amount);
+        if (supportReference == null || supportReference.isBlank()) {
+            throw new InvalidReservationException("supportReference is required for a transfer payment");
+        }
+        if (pendingTransferAmount != null) {
+            throw new PaymentAlreadyResolvedException(
+                    "a transfer is already awaiting a support decision for reservation: " + reservationId);
+        }
+        return new Reservation(reservationId, tenantId, customerId, reservedServices, projectedValue, finalValue,
+                pendingBalance, creditBalance, reservationStatus, PaymentStatus.EN_VALIDACION, "Transferencia",
+                createdAt, amount, supportReference);
+    }
+
+    /**
+     * Aprueba la transferencia en espera: aplica su monto exactamente igual que un
+     * abono.
+     */
+    public Reservation approveTransferPayment() {
+        if (pendingTransferAmount == null) {
+            throw new PaymentAlreadyResolvedException(
+                    "no transfer is awaiting a support decision for reservation: " + reservationId);
+        }
+        return new Reservation(reservationId, tenantId, customerId, reservedServices, projectedValue, finalValue,
+                pendingBalance, creditBalance, reservationStatus, paymentStatus, paymentMethod, createdAt,
+                pendingTransferAmount, transferSupportReference)
+                .registerInstallmentPayment(pendingTransferAmount);
+    }
+
+    /**
+     * Rechaza la transferencia en espera: no modifica el saldo pendiente, solo marca el
+     * pago como rechazado.
+     */
+    public Reservation rejectTransferPayment() {
+        if (pendingTransferAmount == null) {
+            throw new PaymentAlreadyResolvedException(
+                    "no transfer is awaiting a support decision for reservation: " + reservationId);
+        }
+        return new Reservation(reservationId, tenantId, customerId, reservedServices, projectedValue, finalValue,
+                pendingBalance, creditBalance, reservationStatus, PaymentStatus.RECHAZADO, paymentMethod,
+                createdAt, null, null);
+    }
+
+    private void validatePaymentAmount(BigDecimal amount) {
+        if (amount == null || amount.signum() <= 0) {
+            throw new InvalidReservationException("payment amount must be a positive value");
+        }
     }
 
     public UUID reservationId() {
@@ -140,5 +237,13 @@ public final class Reservation {
 
     public Instant createdAt() {
         return createdAt;
+    }
+
+    public BigDecimal pendingTransferAmount() {
+        return pendingTransferAmount;
+    }
+
+    public String transferSupportReference() {
+        return transferSupportReference;
     }
 }
