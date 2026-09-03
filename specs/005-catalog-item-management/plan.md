@@ -112,10 +112,12 @@ specs 003/004.
 - `PATCH /{itemId}` — body con los campos a cambiar (todos opcionales, se conservan los
   no enviados). `200` con el ítem actualizado. Mismas validaciones de `POST` sobre el
   resultado final (si el `PATCH` deja un `LODGING` sin capacidad válida, se rechaza).
-- `POST /{itemId}/deactivate` — sin body. `200` con `active: false`. `409` si ya estaba
-  inactivo (mismo criterio que `Tenant.deactivate()`).
-- `POST /{itemId}/reactivate` — sin body. `200` con `active: true`. `409` si ya estaba
-  activo.
+- `POST /{itemId}/deactivate` — sin body. `200` con `active: false`. `400` si ya estaba
+  inactivo (mismo criterio real que `Tenant.deactivate()`: lanza `InvalidTenantException`,
+  que `TenantController` mapea a `400`, no a `409` — se sigue esa misma convención aquí
+  con `InvalidCatalogItemException`).
+- `POST /{itemId}/reactivate` — sin body. `200` con `active: true`. `400` si ya estaba
+  activo (mismo criterio).
 
 ## Cómo se verifica
 

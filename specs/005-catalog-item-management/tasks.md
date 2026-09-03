@@ -14,7 +14,7 @@ lotes de 2-3 tareas, commit + push sin pedir permiso en cada uno, siempre que
 - [x] T06 — `CreateCatalogItemService` y `CatalogItemQueryService` (resuelven tenant vía `TenantRepositoryPort`, rechazan tenant inexistente/`Inactivo` igual que `RegisterCustomerService`) · repo: backend · ~20 min · depende de T05
 - [x] T07 — `UpdateCatalogItemService`, `DeactivateCatalogItemService`, `ReactivateCatalogItemService` · repo: backend · ~20 min · depende de T06
   **— fin lote 3 (T06-T07): commit + push —**
-- [ ] T08 — `CatalogItemController` (`POST/GET/PATCH` + `/deactivate`/`/reactivate` bajo `/api/tenants/{tenantId}/catalog-items`), DTOs `CatalogItemRequest`/`CatalogItemPatchRequest`/`CatalogItemResponse`, manejadores de excepción (`400`/`404`/`409`) · repo: backend · ~30 min · depende de T07
+- [x] T08 — `CatalogItemController` (`POST/GET/PATCH` + `/deactivate`/`/reactivate` bajo `/api/tenants/{tenantId}/catalog-items`), DTOs `CatalogItemRequest`/`CatalogItemPatchRequest`/`CatalogItemResponse`, manejadores de excepción (`400`/`404`/`409`) · repo: backend · ~30 min · depende de T07
   **— fin lote 4 (T08): commit + push —**
 - [ ] T09 — Agrega la sección "005 — Catálogo operativo" a `PLAN-VERIFICACION.md` con los `curl` de cada criterio de aceptación · repo: backend · ~20 min · depende de T08
 - [ ] T10 — Verifica que `./mvnw test` sigue en verde (spec 001+002+003+004+005) y ejecuta la sección nueva de `PLAN-VERIFICACION.md` de punta a punta contra el servidor local · repo: backend · ~25 min · depende de T09
