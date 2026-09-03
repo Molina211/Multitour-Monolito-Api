@@ -28,10 +28,22 @@ ejecución local.
   endpoints `POST .../deactivate` y `.../reactivate` · repo: backend · ~20 min ·
   depende de T05
   **— fin lote (T05-T06): commit + push —**
-- [ ] T07 — Agrega la sección "008 — Gestión de descuentos" a `PLAN-VERIFICACION.md` con
+- [x] T07 — Agrega la sección "008 — Gestión de descuentos" a `PLAN-VERIFICACION.md` con
   el `curl` de cada criterio de aceptación, incluyendo el caso de solape permitido ·
   repo: backend · ~15 min · depende de T06
-- [ ] T08 — Verifica que `./mvnw test` sigue en verde y ejecuta la sección nueva de
+- [x] T08 — Verifica que `./mvnw test` sigue en verde y ejecuta la sección nueva de
   `PLAN-VERIFICACION.md` de punta a punta contra el servidor local (pide permiso antes
   de correr build/tests/servidor, regla 5) · repo: backend · ~20 min · depende de T07
   **— fin lote (T07-T08): commit + push —**
+
+## Hallazgo durante T08
+
+La verificación end-to-end encontró un bug real en `DiscountRequest`: `priority` y
+`stackable` eran tipos primitivos (`int`/`boolean`), pero `V6__create_discounts.sql` les
+da `DEFAULT 0`/`DEFAULT FALSE` — es decir, se pueden omitir en el `POST`. Con un JSON sin
+esos dos campos, Jackson fallaba al mapear `null` sobre un primitivo (`500`, no el `400`
+esperado). Corregido: `DiscountRequest` ahora usa `Integer`/`Boolean` con
+`priorityOrDefault()`/`stackableOrDefault()`, y el controlador resuelve el valor por
+defecto antes de construir el `CreateDiscountCommand`. Verificado de nuevo con el mismo
+`curl` del paso 3 de la sección "008" en `PLAN-VERIFICACION.md`: ahora responde `404`
+como se esperaba.

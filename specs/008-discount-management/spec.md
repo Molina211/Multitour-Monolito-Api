@@ -1,6 +1,6 @@
 # 008 — Gestión de descuentos operativos (catálogo)
 
-**Estado:** APROBADA
+**Estado:** TERMINADA
 **Fecha:** 2026-09-03
 **Repos afectados:** backend (rama `hu-back-001-dev`)
 **HU relacionada:** HU-DESC-001 del backlog, solo parcialmente — ese HU describe también
@@ -57,16 +57,16 @@ gestiona ítems, no reglas de precio).
 
 ## Criterios de aceptación
 
-- [ ] `POST /api/tenants/{tenantId}/discounts` con datos válidos devuelve `201`.
-- [ ] `POST` con `catalogItemId` de otro tenant o inexistente devuelve `404`.
-- [ ] `POST` con `percentage` fuera de 1-100, o `validFrom > validTo`, devuelve `400`.
-- [ ] `POST` de un segundo descuento activo sobre el mismo `catalogItemId` con vigencia
+- [x] `POST /api/tenants/{tenantId}/discounts` con datos válidos devuelve `201`.
+- [x] `POST` con `catalogItemId` de otro tenant o inexistente devuelve `404`.
+- [x] `POST` con `percentage` fuera de 1-100, o `validFrom > validTo`, devuelve `400`.
+- [x] `POST` de un segundo descuento activo sobre el mismo `catalogItemId` con vigencia
       solapada a uno ya existente devuelve `201` igualmente (no se rechaza por solape).
-- [ ] `GET /api/tenants/{tenantId}/discounts` lista solo los descuentos de ese tenant.
-- [ ] `PATCH` actualiza campos parciales (mismo patrón que `CatalogItem`).
-- [ ] `POST .../{discountId}/deactivate` y `/reactivate` cambian el estado sin borrar el
+- [x] `GET /api/tenants/{tenantId}/discounts` lista solo los descuentos de ese tenant.
+- [x] `PATCH` actualiza campos parciales (mismo patrón que `CatalogItem`).
+- [x] `POST .../{discountId}/deactivate` y `/reactivate` cambian el estado sin borrar el
       registro.
-- [ ] El proyecto compila y los tests existentes (specs 001-007) siguen pasando.
+- [x] El proyecto compila y los tests existentes (specs 001-007) siguen pasando.
 
 ## Impacto en multitenencia
 

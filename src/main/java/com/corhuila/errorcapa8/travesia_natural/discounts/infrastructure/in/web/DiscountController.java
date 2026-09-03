@@ -58,7 +58,7 @@ public class DiscountController {
                                                      @RequestBody DiscountRequest request) {
         CreateDiscountCommand command = new CreateDiscountCommand(
                 tenantId, request.catalogItemId(), request.percentage(), request.validFrom(), request.validTo(),
-                request.priority(), request.stackable(), request.cap(), request.toDiscountBase());
+                request.priorityOrDefault(), request.stackableOrDefault(), request.cap(), request.toDiscountBase());
 
         Discount discount = createDiscountUseCase.createDiscount(command);
 
