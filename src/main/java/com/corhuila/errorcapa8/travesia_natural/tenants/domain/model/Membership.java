@@ -103,6 +103,21 @@ public final class Membership {
                 Instant.now());
     }
 
+    /**
+     * Rebuilds a Membership already persisted (spec 004, login). Unlike {@code createAdministrator}/
+     * {@code createEndCustomer}, this factory does not enforce the creation-time invariants (e.g.
+     * firstName required) because a row that already exists in the database was valid when it was
+     * created under whichever role it has; re-validating it on every read would reject legitimate
+     * Administrator rows (which never had firstName/lastName) if this used createEndCustomer, or
+     * fail to carry role-specific fields if it used createAdministrator. Mirrors Tenant.reconstitute.
+     */
+    public static Membership reconstitute(UUID membershipId, String tenantId, String firstName, String lastName,
+                                           String email, String phone, String passwordHash, MembershipRole role,
+                                           MembershipStatus membershipStatus, Instant createdAt) {
+        return new Membership(membershipId, tenantId, firstName, lastName, email, phone, passwordHash, role,
+                membershipStatus, createdAt);
+    }
+
     public UUID membershipId() {
         return membershipId;
     }
