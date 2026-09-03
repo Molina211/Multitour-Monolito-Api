@@ -14,17 +14,24 @@ public final class Membership {
 
     private final UUID membershipId;
     private final String tenantId;
+    private final String firstName;
+    private final String lastName;
     private final String email;
+    private final String phone;
     private final String passwordHash;
     private final MembershipRole role;
     private final MembershipStatus membershipStatus;
     private final Instant createdAt;
 
-    private Membership(UUID membershipId, String tenantId, String email, String passwordHash,
-                        MembershipRole role, MembershipStatus membershipStatus, Instant createdAt) {
+    private Membership(UUID membershipId, String tenantId, String firstName, String lastName, String email,
+                        String phone, String passwordHash, MembershipRole role, MembershipStatus membershipStatus,
+                        Instant createdAt) {
         this.membershipId = membershipId;
         this.tenantId = tenantId;
+        this.firstName = firstName;
+        this.lastName = lastName;
         this.email = email;
+        this.phone = phone;
         this.passwordHash = passwordHash;
         this.role = role;
         this.membershipStatus = membershipStatus;
@@ -34,7 +41,8 @@ public final class Membership {
     /**
      * Creates the first Administrator membership of a tenant (HU-TEN-001 escenario 1).
      * {@code passwordHash} must already be hashed by the caller (application layer, via
-     * PasswordEncoder) — this factory never sees a plain-text password.
+     * PasswordEncoder) — this factory never sees a plain-text password. Administrator
+     * memberships have no first/last name or phone in this cut (spec 002 scope).
      */
     public static Membership createAdministrator(String tenantId, String email, String passwordHash) {
         if (tenantId == null || tenantId.isBlank()) {
@@ -50,9 +58,47 @@ public final class Membership {
         return new Membership(
                 UUID.randomUUID(),
                 tenantId,
+                null,
+                null,
                 email,
+                null,
                 passwordHash,
                 MembershipRole.ADMINISTRATOR,
+                MembershipStatus.ACTIVA,
+                Instant.now());
+    }
+
+    /**
+     * Creates an End Customer membership (HU-IAM-001). {@code passwordHash} must already be
+     * hashed by the caller (application layer, via PasswordEncoder). {@code phone} is optional.
+     */
+    public static Membership createEndCustomer(String tenantId, String firstName, String lastName, String email,
+                                                 String phone, String passwordHash) {
+        if (tenantId == null || tenantId.isBlank()) {
+            throw new InvalidTenantException("tenantId is required");
+        }
+        if (firstName == null || firstName.isBlank()) {
+            throw new InvalidTenantException("firstName is required");
+        }
+        if (lastName == null || lastName.isBlank()) {
+            throw new InvalidTenantException("lastName is required");
+        }
+        if (email == null || email.isBlank()) {
+            throw new InvalidTenantException("email is required");
+        }
+        if (passwordHash == null || passwordHash.isBlank()) {
+            throw new InvalidTenantException("password is required");
+        }
+
+        return new Membership(
+                UUID.randomUUID(),
+                tenantId,
+                firstName,
+                lastName,
+                email,
+                phone,
+                passwordHash,
+                MembershipRole.END_CUSTOMER,
                 MembershipStatus.ACTIVA,
                 Instant.now());
     }
@@ -65,8 +111,20 @@ public final class Membership {
         return tenantId;
     }
 
+    public String firstName() {
+        return firstName;
+    }
+
+    public String lastName() {
+        return lastName;
+    }
+
     public String email() {
         return email;
+    }
+
+    public String phone() {
+        return phone;
     }
 
     public String passwordHash() {
