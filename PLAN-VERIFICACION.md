@@ -764,3 +764,164 @@ quedó bloqueada por el nuevo filtro.
 ```
 
 Deben seguir en verde `contextLoads` y los tests existentes, sin regresiones.
+
+---
+
+# Plan de verificación — 008 Gestión de descuentos operativos (catálogo)
+
+Corresponde a `specs/008-discount-management/`. Requiere la app corriendo (paso 4 de la
+primera sección) y Postgres arriba (paso 1). Reutiliza el tenant `travesia-natural`
+(debe estar `Activo`) y al menos un `catalogItemId` de tipo `TOUR` creado en la sección
+"005 — Catálogo operativo" (guardar ese id como `<catalogItemId>` para los pasos
+siguientes; si no existe, repetir el paso 1 de esa sección primero).
+
+Nota: este bloque **no** se puede invocar hoy desde `operator/discounts`,
+`new-discount`/`edit-discount` del Frontend (siguen simulando todo en `localStorage` vía
+`operator-discount.service.ts`). Toda esta verificación es directa contra el Backend.
+
+## 1. Verificar el esquema V6
+
+```bash
+docker exec -it multitour-postgres psql -U multitour -d multitour -c "\d discounts"
+```
+
+Se esperan las columnas `discount_id`, `tenant_id`, `catalog_item_id`, `percentage`,
+`valid_from`, `valid_to`, `priority`, `stackable`, `cap`, `base`, `active`,
+`created_at`, y `flyway_schema_history` mostrando `V6` aplicada.
+
+## 2. Crear un descuento válido (`201`)
+
+```bash
+curl -i -X POST http://localhost:8080/api/tenants/travesia-natural/discounts \
+  -H "Content-Type: application/json" \
+  -d '{
+        "catalogItemId": "<catalogItemId>",
+        "percentage": 15,
+        "validFrom": "2026-09-01",
+        "validTo": "2026-12-31",
+        "priority": 1,
+        "stackable": false,
+        "base": "original"
+      }'
+```
+
+Se espera `201 Created` con `active: true` y `base: "original"`. Guardar el
+`discountId` devuelto para los pasos siguientes.
+
+## 3. Rechazo por `catalogItemId` inexistente o de otro tenant (`404`)
+
+```bash
+curl -i -X POST http://localhost:8080/api/tenants/travesia-natural/discounts \
+  -H "Content-Type: application/json" \
+  -d '{ "catalogItemId": "00000000-0000-0000-0000-000000000000", "percentage": 10, "base": "original" }'
+```
+
+Se espera `404 Not Found`.
+
+## 4. Rechazo por datos inválidos (`400`)
+
+```bash
+curl -i -X POST http://localhost:8080/api/tenants/travesia-natural/discounts \
+  -H "Content-Type: application/json" \
+  -d '{ "catalogItemId": "<catalogItemId>", "percentage": 0, "base": "original" }'
+
+curl -i -X POST http://localhost:8080/api/tenants/travesia-natural/discounts \
+  -H "Content-Type: application/json" \
+  -d '{ "catalogItemId": "<catalogItemId>", "percentage": 150, "base": "original" }'
+
+curl -i -X POST http://localhost:8080/api/tenants/travesia-natural/discounts \
+  -H "Content-Type: application/json" \
+  -d '{ "catalogItemId": "<catalogItemId>", "percentage": 10, "validFrom": "2026-12-31", "validTo": "2026-01-01", "base": "original" }'
+```
+
+Se espera `400 Bad Request` en los tres, `{"error":"validation_error", ...}`, sin fila
+nueva persistida.
+
+## 5. Segundo descuento solapado sobre el mismo `catalogItemId` (`201`, no se bloquea)
+
+```bash
+curl -i -X POST http://localhost:8080/api/tenants/travesia-natural/discounts \
+  -H "Content-Type: application/json" \
+  -d '{
+        "catalogItemId": "<catalogItemId>",
+        "percentage": 20,
+        "validFrom": "2026-10-01",
+        "validTo": "2026-10-31",
+        "priority": 2,
+        "stackable": true,
+        "base": "subtotal"
+      }'
+```
+
+Se espera `201 Created` a pesar de que su vigencia se solapa con el descuento del paso 2
+sobre el mismo `catalogItemId` — confirma el criterio de aceptación "no se rechaza por
+solape" (RF-005A/RF-005B, ver `spec.md`).
+
+## 6. Listado del tenant (`200`)
+
+```bash
+curl -i http://localhost:8080/api/tenants/travesia-natural/discounts
+```
+
+Se espera `200 OK` con los dos descuentos creados en los pasos 2 y 5, y ninguno de los
+rechazados en los pasos 3-4.
+
+## 7. Obtener por id y aislamiento entre tenants (`404`)
+
+```bash
+curl -i http://localhost:8080/api/tenants/travesia-natural/discounts/<discountId-del-paso-2>
+curl -i http://localhost:8080/api/tenants/otro-operador/discounts/<discountId-del-paso-2>
+```
+
+El primero espera `200 OK`; el segundo (bajo otro tenant) espera `404 Not Found` — nunca
+revela el descuento de otro tenant.
+
+## 8. Actualización parcial (`200`)
+
+```bash
+curl -i -X PATCH http://localhost:8080/api/tenants/travesia-natural/discounts/<discountId-del-paso-2> \
+  -H "Content-Type: application/json" \
+  -d '{ "percentage": 25 }'
+```
+
+Se espera `200 OK` con `percentage: 25` y el resto de los campos (`validFrom`,
+`priority`, `base`, etc.) sin cambios.
+
+## 9. Desactivar y reactivar sin borrar (`200`, trazabilidad histórica)
+
+```bash
+curl -i -X POST http://localhost:8080/api/tenants/travesia-natural/discounts/<discountId-del-paso-2>/deactivate
+curl -i http://localhost:8080/api/tenants/travesia-natural/discounts/<discountId-del-paso-2>
+
+curl -i -X POST http://localhost:8080/api/tenants/travesia-natural/discounts/<discountId-del-paso-2>/reactivate
+```
+
+El primer `curl` espera `200 OK` con `active: false`; el segundo (`GET` directo)
+confirma que la fila sigue existiendo y siendo consultable; el tercero espera
+`200 OK` con `active: true`.
+
+## 10. Tenant inexistente (`404`) y tenant `Inactivo` (`409`)
+
+```bash
+curl -i http://localhost:8080/api/tenants/no-existe/discounts
+```
+
+Se espera `404 Not Found`. Luego, desactivar `travesia-natural` (paso 5 de la sección
+"002 — Tenant lifecycle") y repetir la creación del paso 2:
+
+```bash
+curl -i -X POST http://localhost:8080/api/tenants/travesia-natural/discounts \
+  -H "Content-Type: application/json" \
+  -d '{ "catalogItemId": "<catalogItemId>", "percentage": 10, "base": "original" }'
+```
+
+Se espera `409 Conflict` con `{"error":"tenant_inactive", ...}`. Reactivar el tenant al
+terminar (paso 6 de esa sección) para no dejar el ambiente inconsistente.
+
+## 11. Compilación y tests (spec 001 a spec 008)
+
+```bash
+./mvnw test
+```
+
+Deben seguir en verde `contextLoads` y los tests existentes, sin regresiones.
