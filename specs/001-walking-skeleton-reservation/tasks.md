@@ -16,9 +16,9 @@ para el final.
 - [x] T06 — Implementar `CreateReservationService` (capa aplicación): genera `reservationId` (UUID v4), arma el agregado, fija estado inicial `Pendiente de pago` / `Sin pago`, invoca el puerto de salida · repo: backend · ~20 min · depende de T05
 - [x] T07 — Implementar adaptador de persistencia: `ReservationEntity`, `ReservedServiceEntity`, `ReservationJpaRepository`, `ReservationRepositoryAdapter` · repo: backend · ~30 min · depende de T03, T05
   **— fin lote 3 (T05-T07): commit + push —**
-- [ ] T08 — Implementar adaptador web: `ReservationController` (`POST /api/reservations`), DTOs de request/response/error, lectura de `X-Tenant-Id`, mapeo de `InvalidReservationException` a 400 · repo: backend · ~30 min · depende de T06
-- [ ] T09 — Implementar `HealthController` (`GET /health`) en `common/web` · repo: backend · ~10 min
-- [ ] T10 — Crear `SecurityConfig` en `common/security` que permite todas las peticiones temporalmente, con comentario explicando que es deuda hasta la spec de JWT · repo: backend · ~15 min
+- [x] T08 — Implementar adaptador web: `ReservationController` (`POST /api/reservations`), DTOs de request/response/error, lectura de `X-Tenant-Id`, mapeo de `InvalidReservationException` a 400 · repo: backend · ~30 min · depende de T06
+- [x] T09 — Implementar `HealthController` (`GET /health`) en `common/web` · repo: backend · ~10 min
+- [x] T10 — Crear `SecurityConfig` en `common/security` que permite todas las peticiones temporalmente, con comentario explicando que es deuda hasta la spec de JWT · repo: backend · ~15 min
   **— fin lote 4 (T08-T10): commit + push —**
 - [ ] T11 — Verificar que el contexto de Spring levanta con todos los beans nuevos; ajustar el test por defecto si hace falta · repo: backend · ~15 min · depende de T07, T08, T09, T10
 - [ ] T12 — Completar `PLAN-VERIFICACION.md` con los comandos exactos de `curl` (`/health`, creación/rechazo de reserva) y la consulta `psql` de aislamiento por tenant · repo: backend · ~20 min · depende de T11
