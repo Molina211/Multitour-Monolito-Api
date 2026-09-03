@@ -22,7 +22,7 @@ public class ReservationEntity {
     private UUID reservationId;
 
     @Column(name = "tenant_id", nullable = false)
-    private UUID tenantId;
+    private String tenantId;
 
     @Column(name = "customer_id", nullable = false)
     private String customerId;
@@ -58,7 +58,7 @@ public class ReservationEntity {
         // JPA
     }
 
-    public ReservationEntity(UUID reservationId, UUID tenantId, String customerId, BigDecimal projectedValue,
+    public ReservationEntity(UUID reservationId, String tenantId, String customerId, BigDecimal projectedValue,
                               BigDecimal finalValue, BigDecimal pendingBalance, BigDecimal creditBalance,
                               String reservationStatus, String paymentStatus, String paymentMethod,
                               Instant createdAt) {
@@ -84,7 +84,7 @@ public class ReservationEntity {
         return reservationId;
     }
 
-    public UUID getTenantId() {
+    public String getTenantId() {
         return tenantId;
     }
 

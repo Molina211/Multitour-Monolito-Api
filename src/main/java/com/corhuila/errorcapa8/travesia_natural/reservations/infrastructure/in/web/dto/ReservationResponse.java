@@ -4,9 +4,11 @@ import com.corhuila.errorcapa8.travesia_natural.reservations.domain.model.Reserv
 
 import java.math.BigDecimal;
 import java.time.Instant;
+import java.util.List;
 import java.util.UUID;
 
-public record ReservationResponse(UUID reservationId, UUID tenantId, String customerId, BigDecimal projectedValue,
+public record ReservationResponse(UUID reservationId, String tenantId, String customerId,
+                                   List<ReservedServiceResponse> reservedServices, BigDecimal projectedValue,
                                    BigDecimal finalValue, BigDecimal pendingBalance, BigDecimal creditBalance,
                                    String reservationStatus, String paymentStatus, String paymentMethod,
                                    Instant createdAt) {
@@ -16,6 +18,7 @@ public record ReservationResponse(UUID reservationId, UUID tenantId, String cust
                 reservation.reservationId(),
                 reservation.tenantId(),
                 reservation.customerId(),
+                reservation.reservedServices().stream().map(ReservedServiceResponse::from).toList(),
                 reservation.projectedValue(),
                 reservation.finalValue(),
                 reservation.pendingBalance(),

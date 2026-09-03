@@ -10,7 +10,6 @@ import jakarta.persistence.ManyToOne;
 import jakarta.persistence.Table;
 
 import java.time.LocalDate;
-import java.util.UUID;
 
 @Entity
 @Table(name = "reserved_services")
@@ -25,7 +24,7 @@ public class ReservedServiceEntity {
     private ReservationEntity reservation;
 
     @Column(name = "tenant_id", nullable = false)
-    private UUID tenantId;
+    private String tenantId;
 
     @Column(name = "service_reference", nullable = false)
     private String serviceReference;
@@ -40,7 +39,7 @@ public class ReservedServiceEntity {
         // JPA
     }
 
-    public ReservedServiceEntity(UUID tenantId, String serviceReference, Integer partySize, LocalDate scheduledDate) {
+    public ReservedServiceEntity(String tenantId, String serviceReference, Integer partySize, LocalDate scheduledDate) {
         this.tenantId = tenantId;
         this.serviceReference = serviceReference;
         this.partySize = partySize;
@@ -55,7 +54,7 @@ public class ReservedServiceEntity {
         return id;
     }
 
-    public UUID getTenantId() {
+    public String getTenantId() {
         return tenantId;
     }
 

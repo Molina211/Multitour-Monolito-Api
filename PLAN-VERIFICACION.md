@@ -38,10 +38,14 @@ Se espera `200 OK` y `{"status":"UP"}`.
 
 ## 6. Crear una reserva
 
+**Nota (spec 006):** `tenantId` ya no se resuelve vía header `X-Tenant-Id`, sino en la
+URL (`/api/tenants/{tenantId}/reservations`), mismo patrón que `tenants`/`catalog`. Los
+pasos 6-8 de esta sección se actualizaron para reflejar el contrato vigente — ver
+sección "006" más abajo para el detalle completo de la migración.
+
 ```bash
-curl -i -X POST http://localhost:8080/api/reservations \
+curl -i -X POST http://localhost:8080/api/tenants/travesia-natural/reservations \
   -H "Content-Type: application/json" \
-  -H "X-Tenant-Id: 11111111-1111-1111-1111-111111111111" \
   -d '{
         "customerId": "cliente-001",
         "projectedValue": 250000,
@@ -60,19 +64,18 @@ docker exec -it multitour-postgres psql -U multitour -d multitour -c "SELECT res
 
 ## 7. Rechazo por datos incompletos
 
-Repetir el `curl` anterior tres veces, cada vez quitando un dato distinto, y confirmar
-`400 Bad Request` en los tres casos sin que quede fila nueva en `reservations`:
+Repetir el `curl` anterior, cada vez quitando un dato distinto, y confirmar
+`400 Bad Request` sin que quede fila nueva en `reservations`:
 
-- Sin el header `X-Tenant-Id`.
 - Sin `customerId` en el body.
 - Con `reservedServices: []` (lista vacía).
 
 ## 8. Aislamiento entre tenants
 
-Repetir el `curl` del paso 6 dos veces con el mismo `customerId` pero un `X-Tenant-Id`
-distinto en cada llamada (por ejemplo `22222222-2222-2222-2222-222222222222`). Confirmar
-con la consulta `psql` del paso 6 que quedan dos filas con `tenant_id` distinto y sin
-ninguna relación cruzada entre ellas.
+Repetir el `curl` del paso 6 dos veces con el mismo `customerId` pero un `{tenantId}`
+distinto en la URL en cada llamada (por ejemplo `travesia-natural` y otro tenant creado
+en la sección "002"). Confirmar con la consulta `psql` del paso 6 que quedan dos filas
+con `tenant_id` distinto y sin ninguna relación cruzada entre ellas.
 
 ## 9. Compilación y test por defecto
 
@@ -544,6 +547,109 @@ Se espera `409 Conflict` con `{"error":"tenant_inactive", ...}`. Reactivar el te
 terminar (paso 6 de esa sección) para no dejar el ambiente inconsistente.
 
 ## 9. Compilación y tests (spec 001 + spec 002 + spec 003 + spec 004 + spec 005)
+
+```bash
+./mvnw test
+```
+
+Deben seguir en verde `contextLoads` y los tests existentes, sin regresiones.
+
+---
+
+# Plan de verificación — 006 Consulta de reservas + alineación de `tenantId`
+
+Corresponde a `specs/006-reservation-query/`. Requiere haber corrido el paso 1
+("Levantar Postgres local") y tener al menos un tenant `Activo` de la sección "002"
+(`travesia-natural`).
+
+**Nota importante:** `V5__alter_reservations_tenant_id.sql` recrea las tablas
+`reservations`/`reserved_services` desde cero (ver `plan.md`, "Decisiones técnicas",
+riesgo 1). Cualquier reserva creada antes de esta migración (por ejemplo, en la sección
+"001") se pierde al aplicar `V5`. Es un costo aceptado de datos de prueba, no de
+producción.
+
+## 1. Arrancar la aplicación y confirmar la migración V5
+
+```bash
+./mvnw spring-boot:run
+```
+
+En el log de arranque debe verse `Successfully applied 1 migration` hacia
+`5 - alter reservations tenant id` (o `Schema "public" up to date` si ya se había
+aplicado antes).
+
+## 2. Crear una reserva con `tenantId` en la URL (`201`)
+
+```bash
+curl -i -X POST http://localhost:8080/api/tenants/travesia-natural/reservations \
+  -H "Content-Type: application/json" \
+  -d '{
+        "customerId": "cliente-006",
+        "projectedValue": 300000,
+        "reservedServices": [
+          { "serviceReference": "tour-laguna-verde", "partySize": 2, "scheduledDate": "2026-10-15" }
+        ]
+      }'
+```
+
+Se espera `201 Created`, con `tenantId: "travesia-natural"` (string, no UUID) y
+`reservedServices` en la respuesta. Guardar el `reservationId` devuelto para los pasos
+siguientes.
+
+## 3. El header `X-Tenant-Id` y la ruta vieja ya no existen
+
+```bash
+curl -i -X POST http://localhost:8080/api/reservations \
+  -H "Content-Type: application/json" \
+  -H "X-Tenant-Id: 11111111-1111-1111-1111-111111111111" \
+  -d '{ "customerId": "cliente-x", "projectedValue": 1000, "reservedServices": [] }'
+```
+
+Se espera `404 Not Found` (ninguna ruta mapeada en `/api/reservations`), confirmando que
+el contrato viejo fue reemplazado, no duplicado.
+
+## 4. Tenant inexistente (`404`) y tenant `Inactivo` (`409`) al crear
+
+```bash
+curl -i -X POST http://localhost:8080/api/tenants/no-existe/reservations \
+  -H "Content-Type: application/json" \
+  -d '{ "customerId": "cliente-006", "projectedValue": 1000, "reservedServices": [{ "serviceReference": "x" }] }'
+```
+
+Se espera `404 Not Found`. Luego, desactivar `travesia-natural` (paso 5 de la sección
+"002") y repetir el `curl` del paso 2: se espera `409 Conflict` con
+`{"error":"tenant_inactive", ...}`. Reactivar el tenant al terminar (paso 6 de esa
+sección).
+
+## 5. Listar reservas del tenant
+
+```bash
+curl -i http://localhost:8080/api/tenants/travesia-natural/reservations
+```
+
+Se espera `200 OK` con un arreglo que incluye la reserva creada en el paso 2.
+
+## 6. Detalle de una reserva
+
+```bash
+curl -i http://localhost:8080/api/tenants/travesia-natural/reservations/<reservationId-del-paso-2>
+```
+
+Se espera `200 OK` con los mismos campos del listado, incluidos `reservedServices` con
+`serviceReference`, `partySize` y `scheduledDate`.
+
+## 7. Aislamiento entre tenants (`404`, no 200 con datos ajenos)
+
+Crear una segunda reserva bajo otro tenant `Activo` (por ejemplo, uno creado en la
+sección "002"), y luego pedir su `reservationId` bajo `travesia-natural`:
+
+```bash
+curl -i http://localhost:8080/api/tenants/travesia-natural/reservations/<reservationId-del-otro-tenant>
+```
+
+Se espera `404 Not Found` (no filtra existencia cruzada).
+
+## 8. Compilación y tests (spec 001 + spec 002 + spec 003 + spec 004 + spec 005 + spec 006)
 
 ```bash
 ./mvnw test
