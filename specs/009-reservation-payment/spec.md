@@ -1,6 +1,6 @@
 # 009 — Registro de pago sobre una reserva
 
-**Estado:** APROBADA
+**Estado:** TERMINADA
 **Fecha:** 2026-09-03
 **Repos afectados:** backend (rama `hu-back-001-dev`)
 **HU relacionada:** ninguna HU formal en el backlog cubre esto punto por punto; se
@@ -75,32 +75,32 @@ backend real detrás. Sin esto, ninguna reserva puede llegar nunca a `Confirmada
 
 ## Criterios de aceptación
 
-- [ ] Registrar un pago **Efectivo** que cubre exactamente el `pendingBalance` de una
+- [x] Registrar un pago **Efectivo** que cubre exactamente el `pendingBalance` de una
       reserva `PENDIENTE_DE_PAGO` devuelve `200`, deja `paymentStatus = PAGADO`,
       `reservationStatus = CONFIRMADA`, `pendingBalance = 0`.
-- [ ] Registrar un pago **Efectivo** que no cubre el `pendingBalance` devuelve `400` sin
+- [x] Registrar un pago **Efectivo** que no cubre el `pendingBalance` devuelve `400` sin
       modificar la reserva.
-- [ ] Registrar un pago **Abono** parcial devuelve `200`, reduce `pendingBalance` en el
+- [x] Registrar un pago **Abono** parcial devuelve `200`, reduce `pendingBalance` en el
       monto pagado, deja `paymentStatus = PARCIAL` y `reservationStatus` sin cambios
       (`PENDIENTE_DE_PAGO`).
-- [ ] Un **Abono** cuyo monto acumulado llega a cubrir el `pendingBalance` deja
+- [x] Un **Abono** cuyo monto acumulado llega a cubrir el `pendingBalance` deja
       `paymentStatus = PAGADO` y `reservationStatus = CONFIRMADA`, igual que Efectivo.
-- [ ] Registrar un pago **Transferencia** con referencia de soporte devuelve `200`,
+- [x] Registrar un pago **Transferencia** con referencia de soporte devuelve `200`,
       deja `paymentStatus = EN_VALIDACION`, y **no** modifica `pendingBalance` todavía.
-- [ ] **Aprobar** una transferencia en validación aplica su monto como un Abono
+- [x] **Aprobar** una transferencia en validación aplica su monto como un Abono
       (recalcula `pendingBalance`/`paymentStatus`/`reservationStatus`); sin `reason`
       devuelve `400`.
-- [ ] **Rechazar** una transferencia en validación deja `paymentStatus = RECHAZADO` sin
+- [x] **Rechazar** una transferencia en validación deja `paymentStatus = RECHAZADO` sin
       tocar `pendingBalance`; sin `reason` devuelve `400`.
-- [ ] Decidir dos veces sobre la misma transferencia ya resuelta (aprobar/rechazar de
+- [x] Decidir dos veces sobre la misma transferencia ya resuelta (aprobar/rechazar de
       nuevo) devuelve `409`.
-- [ ] `GET` de reservas en `EN_VALIDACION` de un tenant devuelve solo las de ese tenant.
-- [ ] Registrar una nota de seguimiento sobre una reserva con saldo pendiente queda
+- [x] `GET` de reservas en `EN_VALIDACION` de un tenant devuelve solo las de ese tenant.
+- [x] Registrar una nota de seguimiento sobre una reserva con saldo pendiente queda
       consultable después en orden cronológico; no cambia `paymentStatus` ni
       `reservationStatus`.
-- [ ] Cualquier operación sobre un `tenantId` inexistente devuelve `404`; sobre uno
+- [x] Cualquier operación sobre un `tenantId` inexistente devuelve `404`; sobre uno
       `Inactivo`, `409`.
-- [ ] El proyecto compila y los tests existentes (specs 001-008) siguen pasando.
+- [x] El proyecto compila y los tests existentes (specs 001-008) siguen pasando.
 
 ## Impacto en multitenencia
 
