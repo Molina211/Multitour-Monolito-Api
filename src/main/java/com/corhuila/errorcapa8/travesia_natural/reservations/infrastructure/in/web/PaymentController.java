@@ -7,10 +7,15 @@ import com.corhuila.errorcapa8.travesia_natural.reservations.domain.exception.Re
 import com.corhuila.errorcapa8.travesia_natural.reservations.domain.model.Reservation;
 import com.corhuila.errorcapa8.travesia_natural.reservations.domain.port.in.DecidePaymentSupportCommand;
 import com.corhuila.errorcapa8.travesia_natural.reservations.domain.port.in.DecidePaymentSupportUseCase;
+import com.corhuila.errorcapa8.travesia_natural.reservations.domain.port.in.PaymentFollowupQueryUseCase;
 import com.corhuila.errorcapa8.travesia_natural.reservations.domain.port.in.RegisterPaymentCommand;
+import com.corhuila.errorcapa8.travesia_natural.reservations.domain.port.in.RegisterPaymentFollowupCommand;
+import com.corhuila.errorcapa8.travesia_natural.reservations.domain.port.in.RegisterPaymentFollowupUseCase;
 import com.corhuila.errorcapa8.travesia_natural.reservations.domain.port.in.RegisterPaymentUseCase;
 import com.corhuila.errorcapa8.travesia_natural.reservations.domain.port.in.ReservationQueryUseCase;
 import com.corhuila.errorcapa8.travesia_natural.reservations.infrastructure.in.web.dto.DecidePaymentSupportRequest;
+import com.corhuila.errorcapa8.travesia_natural.reservations.infrastructure.in.web.dto.PaymentFollowupRequest;
+import com.corhuila.errorcapa8.travesia_natural.reservations.infrastructure.in.web.dto.PaymentFollowupResponse;
 import com.corhuila.errorcapa8.travesia_natural.reservations.infrastructure.in.web.dto.RegisterPaymentRequest;
 import com.corhuila.errorcapa8.travesia_natural.reservations.infrastructure.in.web.dto.ReservationResponse;
 import com.corhuila.errorcapa8.travesia_natural.tenants.domain.exception.TenantInactiveException;
@@ -39,13 +44,19 @@ public class PaymentController {
     private final RegisterPaymentUseCase registerPaymentUseCase;
     private final DecidePaymentSupportUseCase decidePaymentSupportUseCase;
     private final ReservationQueryUseCase reservationQueryUseCase;
+    private final RegisterPaymentFollowupUseCase registerPaymentFollowupUseCase;
+    private final PaymentFollowupQueryUseCase paymentFollowupQueryUseCase;
 
     public PaymentController(RegisterPaymentUseCase registerPaymentUseCase,
                               DecidePaymentSupportUseCase decidePaymentSupportUseCase,
-                              ReservationQueryUseCase reservationQueryUseCase) {
+                              ReservationQueryUseCase reservationQueryUseCase,
+                              RegisterPaymentFollowupUseCase registerPaymentFollowupUseCase,
+                              PaymentFollowupQueryUseCase paymentFollowupQueryUseCase) {
         this.registerPaymentUseCase = registerPaymentUseCase;
         this.decidePaymentSupportUseCase = decidePaymentSupportUseCase;
         this.reservationQueryUseCase = reservationQueryUseCase;
+        this.registerPaymentFollowupUseCase = registerPaymentFollowupUseCase;
+        this.paymentFollowupQueryUseCase = paymentFollowupQueryUseCase;
     }
 
     @PostMapping("/{reservationId}/payments")
@@ -80,6 +91,29 @@ public class PaymentController {
                 .toList();
 
         return ResponseEntity.ok(reservations);
+    }
+
+    @PostMapping("/{reservationId}/payments/followups")
+    public ResponseEntity<PaymentFollowupResponse> registerFollowup(@PathVariable String tenantId,
+                                                                      @PathVariable UUID reservationId,
+                                                                      @RequestBody PaymentFollowupRequest request) {
+        RegisterPaymentFollowupCommand command = new RegisterPaymentFollowupCommand(
+                tenantId, reservationId, request.note(), request.actorId());
+
+        var record = registerPaymentFollowupUseCase.registerFollowup(command);
+
+        return ResponseEntity.status(HttpStatus.CREATED).body(PaymentFollowupResponse.from(record));
+    }
+
+    @GetMapping("/{reservationId}/payments/followups")
+    public ResponseEntity<List<PaymentFollowupResponse>> listFollowups(@PathVariable String tenantId,
+                                                                         @PathVariable UUID reservationId) {
+        List<PaymentFollowupResponse> followups = paymentFollowupQueryUseCase.listFollowups(tenantId, reservationId)
+                .stream()
+                .map(PaymentFollowupResponse::from)
+                .toList();
+
+        return ResponseEntity.ok(followups);
     }
 
     @ExceptionHandler({InvalidReservationException.class, IllegalArgumentException.class})

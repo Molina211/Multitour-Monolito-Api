@@ -925,3 +925,173 @@ terminar (paso 6 de esa sección) para no dejar el ambiente inconsistente.
 ```
 
 Deben seguir en verde `contextLoads` y los tests existentes, sin regresiones.
+
+---
+
+# Plan de verificación — 009 Registro de pago sobre una reserva
+
+Corresponde a `specs/009-reservation-payment/`. Requiere Postgres arriba (paso 1), la
+app corriendo (paso 4 de la primera sección), el tenant `travesia-natural` `Activo`, y
+un token válido de `laura.gomez@example.com` (sección "007", pasos 1-2) para crear
+reservas nuevas. Cada escenario usa su propia reserva porque los pagos son irreversibles
+sobre el mismo agregado.
+
+```bash
+TOKEN="<accessToken de la sección 007, paso 1>"
+```
+
+## 1. Efectivo que cubre exactamente el saldo (`200`, `Confirmada`)
+
+```bash
+curl -s -X POST http://localhost:8080/api/tenants/travesia-natural/reservations \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer ${TOKEN}" \
+  -d '{ "projectedValue": 300000, "reservedServices": [{ "serviceReference": "tour-laguna-verde" }] }'
+```
+
+Guardar el `reservationId` de la respuesta como `RES_A`, luego:
+
+```bash
+curl -i -X POST http://localhost:8080/api/tenants/travesia-natural/reservations/${RES_A}/payments \
+  -H "Content-Type: application/json" \
+  -d '{ "method": "EFECTIVO", "amount": 300000 }'
+```
+
+Se espera `200 OK` con `paymentStatus: "Pagado"`, `reservationStatus: "Confirmada"`,
+`pendingBalance: 0`.
+
+## 2. Efectivo insuficiente (`400`, sin cambios)
+
+Repetir la creación del paso 1 para obtener `RES_B` (`projectedValue: 300000`), luego:
+
+```bash
+curl -i -X POST http://localhost:8080/api/tenants/travesia-natural/reservations/${RES_B}/payments \
+  -H "Content-Type: application/json" \
+  -d '{ "method": "EFECTIVO", "amount": 200000 }'
+```
+
+Se espera `400 Bad Request`. Confirmar con
+`curl -s http://localhost:8080/api/tenants/travesia-natural/reservations/${RES_B}` que
+`pendingBalance` sigue en `300000` y `paymentStatus` en `"Sin pago"`.
+
+## 3. Abono parcial y abono que completa (`200` en ambos, `Confirmada` al completar)
+
+Crear `RES_C` (`projectedValue: 300000`), luego:
+
+```bash
+curl -i -X POST http://localhost:8080/api/tenants/travesia-natural/reservations/${RES_C}/payments \
+  -H "Content-Type: application/json" \
+  -d '{ "method": "ABONO", "amount": 100000 }'
+```
+
+Se espera `200 OK`, `paymentStatus: "Parcial"`, `pendingBalance: 200000`,
+`reservationStatus` sigue `"Pendiente de pago"`. Luego:
+
+```bash
+curl -i -X POST http://localhost:8080/api/tenants/travesia-natural/reservations/${RES_C}/payments \
+  -H "Content-Type: application/json" \
+  -d '{ "method": "ABONO", "amount": 200000 }'
+```
+
+Se espera `200 OK`, `paymentStatus: "Pagado"`, `reservationStatus: "Confirmada"`,
+`pendingBalance: 0`.
+
+## 4. Transferencia: registro, aprobación y doble decisión (`200`, `200`, `409`)
+
+Crear `RES_D` (`projectedValue: 300000`), luego:
+
+```bash
+curl -i -X POST http://localhost:8080/api/tenants/travesia-natural/reservations/${RES_D}/payments \
+  -H "Content-Type: application/json" \
+  -d '{ "method": "TRANSFERENCIA", "amount": 300000, "supportReference": "comprobante-001.png" }'
+```
+
+Se espera `200 OK`, `paymentStatus: "En validacion"`, `pendingBalance` sigue en `300000`
+(no se aplica todavía). Luego, aprobar sin `reason` (`400`):
+
+```bash
+curl -i -X POST http://localhost:8080/api/tenants/travesia-natural/reservations/${RES_D}/payments/decide-support \
+  -H "Content-Type: application/json" \
+  -d '{ "decision": "APPROVE", "actorId": "admin" }'
+```
+
+Se espera `400 Bad Request`. Ahora con `reason`:
+
+```bash
+curl -i -X POST http://localhost:8080/api/tenants/travesia-natural/reservations/${RES_D}/payments/decide-support \
+  -H "Content-Type: application/json" \
+  -d '{ "decision": "APPROVE", "reason": "Comprobante verificado en el banco", "actorId": "admin" }'
+```
+
+Se espera `200 OK`, `paymentStatus: "Pagado"`, `reservationStatus: "Confirmada"`,
+`pendingBalance: 0` — igual que un Abono. Repetir el mismo `curl` una segunda vez: se
+espera `409 Conflict` con `{"error":"payment_already_resolved", ...}`.
+
+## 5. Transferencia rechazada (`200`, sin tocar el saldo)
+
+Crear `RES_E` (`projectedValue: 300000`) y registrar una transferencia igual que en el
+paso 4. Luego:
+
+```bash
+curl -i -X POST http://localhost:8080/api/tenants/travesia-natural/reservations/${RES_E}/payments/decide-support \
+  -H "Content-Type: application/json" \
+  -d '{ "decision": "REJECT", "reason": "Comprobante ilegible", "actorId": "admin" }'
+```
+
+Se espera `200 OK`, `paymentStatus: "Rechazado"`, `pendingBalance` sigue en `300000`.
+Repetir el mismo `curl`: se espera `409 Conflict`.
+
+## 6. Listado de soportes pendientes por tenant (`200`, aislado por tenant)
+
+Crear `RES_F` (`projectedValue: 300000`) y registrar una transferencia sin decidirla
+(igual que el paso 4, sin llamar a `decide-support`). Luego:
+
+```bash
+curl -s http://localhost:8080/api/tenants/travesia-natural/reservations/pending-support
+```
+
+Se espera `200 OK` con exactamente `RES_F` en la lista (`RES_D` y `RES_E` ya quedaron
+resueltas en los pasos 4-5). Confirmar aislamiento con un segundo tenant `Activo`
+(por ejemplo el creado en la sección "002"): su `GET .../pending-support` no debe
+incluir `RES_F`.
+
+## 7. Nota de seguimiento (`201`, consultable en orden cronológico)
+
+Sobre `RES_C` (saldo ya en `0` tras el paso 3 — el criterio no exige saldo pendiente
+para registrar la nota, solo que no cambie ningún estado):
+
+```bash
+curl -i -X POST http://localhost:8080/api/tenants/travesia-natural/reservations/${RES_C}/payments/followups \
+  -H "Content-Type: application/json" \
+  -d '{ "note": "Cliente confirma que el comprobante llega por correo", "actorId": "admin" }'
+```
+
+Se espera `201 Created`. Luego:
+
+```bash
+curl -s http://localhost:8080/api/tenants/travesia-natural/reservations/${RES_C}/payments/followups
+```
+
+Se espera `200 OK` con la nota del paso anterior, y `paymentStatus`/`reservationStatus`
+de `RES_C` sin cambios respecto al paso 3.
+
+## 8. Tenant inexistente (`404`) y tenant `Inactivo` (`409`)
+
+```bash
+curl -i -X POST http://localhost:8080/api/tenants/no-existe/reservations/${RES_C}/payments \
+  -H "Content-Type: application/json" \
+  -d '{ "method": "ABONO", "amount": 1000 }'
+```
+
+Se espera `404 Not Found`. Luego, desactivar `travesia-natural` (paso 5 de la sección
+"002") y repetir cualquier operación de pago sobre `RES_C`: se espera
+`409 Conflict` con `{"error":"tenant_inactive", ...}`. Reactivar el tenant al terminar
+(paso 6 de esa sección).
+
+## 9. Compilación y tests (spec 001 a spec 009)
+
+```bash
+./mvnw test
+```
+
+Deben seguir en verde `contextLoads` y los tests existentes, sin regresiones.

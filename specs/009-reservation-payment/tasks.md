@@ -22,11 +22,11 @@
 
   *(fin lote 2: T03-T04)*
 
-- [ ] T05 — `RegisterPaymentFollowupCommand`/`UseCase`/`Service` (vía `AuditRecorder`) +
+- [x] T05 — `RegisterPaymentFollowupCommand`/`UseCase`/`Service` (vía `AuditRecorder`) +
       método de consulta de seguimientos (filtra `findAll()` por tenant/reserva/acción) +
       endpoints `POST`/`GET .../payments/followups` + DTOs de seguimiento · repo: backend
       · depende de T04 · ~25 min
-- [ ] T06 — Actualizar `PLAN-VERIFICACION.md` con la sección "009 — Registro de pago
+- [x] T06 — Actualizar `PLAN-VERIFICACION.md` con la sección "009 — Registro de pago
       sobre una reserva": un `curl` por cada criterio de aceptación · repo: backend ·
       depende de T05 · ~20 min
 
