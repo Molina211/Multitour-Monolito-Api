@@ -334,3 +334,94 @@ para no dejar el ambiente en un estado inconsistente para pruebas futuras.
 ```
 
 Deben seguir en verde `contextLoads` y los tests existentes, sin regresiones.
+
+---
+
+# Plan de verificación — 004 End customer login
+
+Corresponde a `specs/004-end-customer-login/`. Requiere la app corriendo (paso 4 de la
+primera sección) y Postgres arriba (paso 1). Reutiliza el tenant `travesia-natural` y el
+cliente `laura.gomez@example.com` creados en la sección "003 — End customer
+registration" (si no existen, repetir esos pasos primero).
+
+Nota: este endpoint **no** se puede invocar hoy desde `login.component.ts` del Frontend
+(no tiene campo de tenant) — ver el comentario extenso en `AuthController.java`. Toda
+esta verificación es directa contra el Backend.
+
+## 1. Login exitoso
+
+```bash
+curl -i -X POST http://localhost:8080/api/tenants/travesia-natural/login \
+  -H "Content-Type: application/json" \
+  -d '{ "email": "laura.gomez@example.com", "password": "Cliente123!" }'
+```
+
+Se espera `200 OK` con `accessToken` (JWT), `tenantId: "travesia-natural"`,
+`role: "END_CUSTOMER"`, y sin `passwordHash` en ningún lado de la respuesta. Decodificar
+el JWT (por ejemplo en https://jwt.io o `echo "<payload-base64>" | base64 -d`, usando
+solo la parte del medio del token) y confirmar que trae `sub`, `tenantId`, `email`,
+`role`, `iat` y `exp`.
+
+## 2. Rechazo por password incorrecto
+
+```bash
+curl -i -X POST http://localhost:8080/api/tenants/travesia-natural/login \
+  -H "Content-Type: application/json" \
+  -d '{ "email": "laura.gomez@example.com", "password": "Incorrecta1!" }'
+```
+
+Se espera `401 Unauthorized` con `{"error":"invalid_credentials", ...}`.
+
+## 3. Rechazo por email sin membership en ese tenant (incluye email de otro tenant)
+
+```bash
+curl -i -X POST http://localhost:8080/api/tenants/travesia-natural/login \
+  -H "Content-Type: application/json" \
+  -d '{ "email": "no-existe@example.com", "password": "Cliente123!" }'
+```
+
+Se espera `401 Unauthorized`, mismo cuerpo genérico que el paso 2 (sin diferencia
+observable entre "no existe" y "password incorrecto").
+
+## 4. Rechazo por `tenantId` inexistente (no debe ser 404)
+
+```bash
+curl -i -X POST http://localhost:8080/api/tenants/no-existe/login \
+  -H "Content-Type: application/json" \
+  -d '{ "email": "laura.gomez@example.com", "password": "Cliente123!" }'
+```
+
+Se espera `401 Unauthorized`, el mismo cuerpo genérico — nunca `404` (evita enumerar
+tenants válidos, ver criterios de aceptación de `spec.md`).
+
+## 5. Rechazo por tenant `Inactivo`
+
+Desactivar `travesia-natural` (paso 5 de la sección "002 — Tenant lifecycle") y repetir
+el `curl` del paso 1 de esta sección. Se espera `401 Unauthorized` con el mismo cuerpo
+genérico. Reactivar el tenant al terminar (paso 6 de esa sección).
+
+## 6. Rechazo por membership `INACTIVA`
+
+No hay todavía un endpoint para desactivar una membership individual (fuera de alcance
+de spec 002/003/004) — este paso queda pendiente de una spec futura que agregue esa
+capacidad; de momento se puede simular manualmente por base de datos, solo en el
+ambiente local de verificación:
+
+```bash
+docker exec -it multitour-postgres psql -U multitour -d multitour -c "UPDATE memberships SET membership_status = 'INACTIVA' WHERE email = 'laura.gomez@example.com';"
+```
+
+Repetir el `curl` del paso 1: se espera `401 Unauthorized` con el mismo cuerpo genérico.
+Revertir el cambio para no dejar el ambiente inconsistente:
+
+```bash
+docker exec -it multitour-postgres psql -U multitour -d multitour -c "UPDATE memberships SET membership_status = 'ACTIVA' WHERE email = 'laura.gomez@example.com';"
+```
+
+## 7. Compilación y tests (spec 001 + spec 002 + spec 003 + spec 004)
+
+```bash
+./mvnw test
+```
+
+Deben seguir en verde `contextLoads` y los tests existentes, sin regresiones.

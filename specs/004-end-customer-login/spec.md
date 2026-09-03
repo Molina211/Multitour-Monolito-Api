@@ -1,6 +1,6 @@
 # 004 — Login de End Customer (emisión de JWT)
 
-**Estado:** APROBADA
+**Estado:** TERMINADA
 **Fecha:** 2026-09-03
 **Repos afectados:** backend (requiere un cambio futuro en frontend, documentado pero
 no ejecutado aquí — ver "Riesgos y decisiones abiertas")
@@ -56,21 +56,21 @@ identificar una cuenta primero).
 
 ## Criterios de aceptación
 
-- [ ] `POST /api/tenants/{tenantId}/login` con `email`/`password` correctos de una
+- [x] `POST /api/tenants/{tenantId}/login` con `email`/`password` correctos de una
       membership `ACTIVA` en un tenant `Activo` devuelve `200` con un JWT válido
       (`sub`, `tenantId`, `email`, `role`, expiración) y los datos básicos de la
       membership, nunca `passwordHash`.
-- [ ] `password` incorrecto devuelve `401` con el mensaje genérico.
-- [ ] Email sin membership en ese tenant devuelve `401` con el mismo mensaje genérico
+- [x] `password` incorrecto devuelve `401` con el mensaje genérico.
+- [x] Email sin membership en ese tenant devuelve `401` con el mismo mensaje genérico
       (cubre HU-IAM-002 escenario 3: mismo email con cuenta en un tenant distinto).
-- [ ] `tenantId` inexistente devuelve `401` con el mismo mensaje genérico — **no**
+- [x] `tenantId` inexistente devuelve `401` con el mismo mensaje genérico — **no**
       `404`, a diferencia de los demás endpoints de `tenants`: revelar con un `404`
       que un `tenantId` no existe permitiría enumerar tenants válidos probando IDs
       contra el login, algo que ningún otro endpoint de esta spec necesita ocultar.
-- [ ] Tenant `Inactivo` devuelve `401` con el mismo mensaje genérico (consistente con
+- [x] Tenant `Inactivo` devuelve `401` con el mismo mensaje genérico (consistente con
       el bloqueo ya aplicado al registro en spec 003).
-- [ ] Membership `INACTIVA` devuelve `401` con el mismo mensaje genérico.
-- [ ] El proyecto compila y los tests existentes (spec 001, 002 y 003) siguen pasando.
+- [x] Membership `INACTIVA` devuelve `401` con el mismo mensaje genérico.
+- [x] El proyecto compila y los tests existentes (spec 001, 002 y 003) siguen pasando.
 
 ## Impacto en multitenencia
 
