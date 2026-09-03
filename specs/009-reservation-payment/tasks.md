@@ -32,7 +32,7 @@
 
   *(fin lote 3: T05-T06)*
 
-- [ ] T07 — Verificación final: `./mvnw test` en verde y ejecución manual de
+- [x] T07 — Verificación final: `./mvnw test` en verde y ejecución manual de
       `PLAN-VERIFICACION.md` sección 009 contra el servidor local; marcar los criterios
       de aceptación de `spec.md` como cumplidos · repo: backend · depende de T06 ·
       requiere permiso explícito para build/tests/servidor (regla 5 de CLAUDE.md) ·
