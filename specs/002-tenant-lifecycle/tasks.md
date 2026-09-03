@@ -7,9 +7,9 @@ lotes de 2-3 tareas, commit + push sin pedir permiso en cada uno, siempre que
 - [x] T01 — Migración `db/migration/V2__create_tenants.sql` con `tenants`, `memberships`, `audit_records` (`tenant_id` como PK string en `tenants`, `NOT NULL` en `memberships`) · repo: backend · ~25 min
 - [x] T02 — Modelo de dominio: `Tenant`, `TenantStatus`, `Membership`, `MembershipRole`, `MembershipStatus`, `InvalidTenantException`, `TenantAlreadyExistsException`, `TenantNotFoundException` · repo: backend · ~30 min
   **— fin lote 1 (T01-T02): commit + push —**
-- [ ] T03 — Bean `PasswordEncoder` (`BCryptPasswordEncoder`) en `SecurityConfig`, sin tocar el `permitAll()` existente · repo: backend · ~10 min
-- [ ] T04 — Puertos de `tenants`: `CreateTenantUseCase`/`Command`, `DeactivateTenantUseCase`/`Command`, `ReactivateTenantUseCase`/`Command`, `TenantQueryUseCase`, `TenantRepositoryPort`, `MembershipRepositoryPort` · repo: backend · ~25 min · depende de T02
-- [ ] T05 — `common/audit`: modelo `AuditRecord` y puerto de salida `AuditRecorder` (sin implementación todavía) · repo: backend · ~15 min
+- [x] T03 — Bean `PasswordEncoder` (`BCryptPasswordEncoder`) en `SecurityConfig`, sin tocar el `permitAll()` existente · repo: backend · ~10 min
+- [x] T04 — Puertos de `tenants`: `CreateTenantUseCase`/`Command`, `DeactivateTenantUseCase`/`Command`, `ReactivateTenantUseCase`/`Command`, `TenantQueryUseCase`, `TenantRepositoryPort`, `MembershipRepositoryPort` · repo: backend · ~25 min · depende de T02
+- [x] T05 — `common/audit`: modelo `AuditRecord` y puerto de salida `AuditRecorder` (sin implementación todavía) · repo: backend · ~15 min
   **— fin lote 2 (T03-T05): commit + push —**
 - [ ] T06 — Adaptador de persistencia de `tenants`: `TenantEntity`, `MembershipEntity`, `TenantJpaRepository`, `MembershipJpaRepository`, `TenantRepositoryAdapter`, `MembershipRepositoryAdapter` · repo: backend · ~30 min · depende de T01, T04
 - [ ] T07 — Adaptador de persistencia de auditoría: `AuditRecordEntity`, `AuditRecordJpaRepository`, `AuditRecorderAdapter` (implementa el puerto de T05) · repo: backend · ~20 min · depende de T01, T05
