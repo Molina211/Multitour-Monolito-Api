@@ -18,12 +18,20 @@ public class MembershipRepositoryAdapter implements MembershipRepositoryPort {
         jpaRepository.save(new MembershipEntity(
                 membership.membershipId(),
                 membership.tenantId(),
+                membership.firstName(),
+                membership.lastName(),
                 membership.email(),
+                membership.phone(),
                 membership.passwordHash(),
                 membership.role().name(),
                 membership.membershipStatus().name(),
                 membership.createdAt()));
 
         return membership;
+    }
+
+    @Override
+    public boolean existsByTenantIdAndEmail(String tenantId, String email) {
+        return jpaRepository.existsByTenantIdAndEmail(tenantId, email);
     }
 }

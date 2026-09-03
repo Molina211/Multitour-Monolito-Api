@@ -5,4 +5,6 @@ import org.springframework.data.jpa.repository.JpaRepository;
 import java.util.UUID;
 
 public interface MembershipJpaRepository extends JpaRepository<MembershipEntity, UUID> {
+
+    boolean existsByTenantIdAndEmail(String tenantId, String email);
 }

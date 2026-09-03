@@ -19,8 +19,17 @@ public class MembershipEntity {
     @Column(name = "tenant_id", nullable = false)
     private String tenantId;
 
+    @Column(name = "first_name")
+    private String firstName;
+
+    @Column(name = "last_name")
+    private String lastName;
+
     @Column(name = "email", nullable = false)
     private String email;
+
+    @Column(name = "phone")
+    private String phone;
 
     @Column(name = "password_hash", nullable = false)
     private String passwordHash;
@@ -38,11 +47,15 @@ public class MembershipEntity {
         // JPA
     }
 
-    public MembershipEntity(UUID membershipId, String tenantId, String email, String passwordHash, String role,
-                             String membershipStatus, Instant createdAt) {
+    public MembershipEntity(UUID membershipId, String tenantId, String firstName, String lastName, String email,
+                             String phone, String passwordHash, String role, String membershipStatus,
+                             Instant createdAt) {
         this.membershipId = membershipId;
         this.tenantId = tenantId;
+        this.firstName = firstName;
+        this.lastName = lastName;
         this.email = email;
+        this.phone = phone;
         this.passwordHash = passwordHash;
         this.role = role;
         this.membershipStatus = membershipStatus;
@@ -57,8 +70,20 @@ public class MembershipEntity {
         return tenantId;
     }
 
+    public String getFirstName() {
+        return firstName;
+    }
+
+    public String getLastName() {
+        return lastName;
+    }
+
     public String getEmail() {
         return email;
+    }
+
+    public String getPhone() {
+        return phone;
     }
 
     public String getPasswordHash() {
