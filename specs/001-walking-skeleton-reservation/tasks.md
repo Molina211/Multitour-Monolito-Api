@@ -9,8 +9,8 @@ para el final.
 - [x] T01 — Agregar dependencias de Postgres y Flyway a `build.gradle` (`org.postgresql:postgresql`, `org.flywaydb:flyway-core`, `org.flywaydb:flyway-database-postgresql`) · repo: backend · ~15 min
 - [x] T02 — Crear `docker-compose.yml` con servicio Postgres para desarrollo local, configurar `application.properties` (datasource, `spring.jpa.hibernate.ddl-auto=validate`, `spring.flyway.enabled=true`) y crear `PLAN-VERIFICACION.md` inicial con el paso `docker compose up -d` · repo: backend · ~20 min
   **— fin lote 1 (T01-T02): commit + push —**
-- [ ] T03 — Crear migración `db/migration/V1__create_reservations.sql` con las tablas `reservations` y `reserved_services`, `tenant_id NOT NULL` en ambas; agregar el paso de verificación del esquema a `PLAN-VERIFICACION.md` · repo: backend · ~30 min · depende de T01, T02
-- [ ] T04 — Crear el modelo de dominio: `Reservation`, `ReservedService`, `ReservationStatus`, `PaymentStatus`, `InvalidReservationException`, con la regla "al menos un servicio reservado" validada al construir · repo: backend · ~30 min
+- [x] T03 — Crear migración `db/migration/V1__create_reservations.sql` con las tablas `reservations` y `reserved_services`, `tenant_id NOT NULL` en ambas; agregar el paso de verificación del esquema a `PLAN-VERIFICACION.md` · repo: backend · ~30 min · depende de T01, T02
+- [x] T04 — Crear el modelo de dominio: `Reservation`, `ReservedService`, `ReservationStatus`, `PaymentStatus`, `InvalidReservationException`, con la regla "al menos un servicio reservado" validada al construir · repo: backend · ~30 min
   **— fin lote 2 (T03-T04): commit + push —**
 - [ ] T05 — Definir puertos `CreateReservationUseCase` (entrada) y `ReservationRepositoryPort` (salida) en `reservations/domain/port` · repo: backend · ~15 min · depende de T04
 - [ ] T06 — Implementar `CreateReservationService` (capa aplicación): genera `reservationId` (UUID v4), arma el agregado, fija estado inicial `Pendiente de pago` / `Sin pago`, invoca el puerto de salida · repo: backend · ~20 min · depende de T05
