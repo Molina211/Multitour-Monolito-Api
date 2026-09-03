@@ -20,7 +20,8 @@ para el final.
 - [x] T09 — Implementar `HealthController` (`GET /health`) en `common/web` · repo: backend · ~10 min
 - [x] T10 — Crear `SecurityConfig` en `common/security` que permite todas las peticiones temporalmente, con comentario explicando que es deuda hasta la spec de JWT · repo: backend · ~15 min
   **— fin lote 4 (T08-T10): commit + push —**
-- [ ] T11 — Verificar que el contexto de Spring levanta con todos los beans nuevos; ajustar el test por defecto si hace falta · repo: backend · ~15 min · depende de T07, T08, T09, T10
-- [ ] T12 — Completar `PLAN-VERIFICACION.md` con los comandos exactos de `curl` (`/health`, creación/rechazo de reserva) y la consulta `psql` de aislamiento por tenant · repo: backend · ~20 min · depende de T11
-- [ ] T13 — Verificar los criterios de aceptación de `spec.md` ejecutando `PLAN-VERIFICACION.md` de punta a punta · repo: backend · ~20 min · depende de T12
-  **— fin lote 5 (T11-T13): commit + push —**
+- [x] T11 — Verificar que el contexto de Spring levanta con todos los beans nuevos; ajustar el test por defecto si hace falta · repo: backend · ~15 min · depende de T07, T08, T09, T10
+- [x] T14 — Migrar el build tool de Gradle a Maven (`pom.xml`, wrapper `mvnw`/`mvnw.cmd`, retiro de `build.gradle`/`settings.gradle`/`gradlew`); agrega `org.springframework.boot:spring-boot-flyway` como dependencia explícita, requerida en Spring Boot 4.1.1 porque el autoconfigure de Flyway se movió a un módulo separado (sin ella, Flyway nunca corría y Hibernate fallaba con "missing table") · repo: backend · ~30 min · decisión del responsable humano, no parte del plan original
+- [x] T12 — Completar `PLAN-VERIFICACION.md` con los comandos exactos de `curl` (`/health`, creación/rechazo de reserva) y la consulta `psql` de aislamiento por tenant, usando `./mvnw` · repo: backend · ~20 min · depende de T11
+- [x] T13 — Verificar los criterios de aceptación de `spec.md` ejecutando `PLAN-VERIFICACION.md` de punta a punta · repo: backend · ~20 min · depende de T12
+  **— fin lote 5 (T11-T14): commit + push —**
