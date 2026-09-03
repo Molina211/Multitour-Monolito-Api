@@ -22,9 +22,9 @@ ejecución local.
   `DiscountResponse` + `@ExceptionHandler` (400/404/409, reutilizando excepciones de
   `tenants`/`catalog`) · repo: backend · ~30 min · depende de T03
   **— fin lote (T03-T04): commit + push —**
-- [ ] T05 — `UpdateDiscountCommand`/`UpdateDiscountUseCase`/`UpdateDiscountService` +
+- [x] T05 — `UpdateDiscountCommand`/`UpdateDiscountUseCase`/`UpdateDiscountService` +
   endpoint `PATCH` + `DiscountPatchRequest` · repo: backend · ~20 min · depende de T04
-- [ ] T06 — `DeactivateDiscountUseCase`/`ReactivateDiscountUseCase` + servicios +
+- [x] T06 — `DeactivateDiscountUseCase`/`ReactivateDiscountUseCase` + servicios +
   endpoints `POST .../deactivate` y `.../reactivate` · repo: backend · ~20 min ·
   depende de T05
   **— fin lote (T05-T06): commit + push —**

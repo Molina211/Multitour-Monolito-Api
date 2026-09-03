@@ -7,7 +7,12 @@ import com.corhuila.errorcapa8.travesia_natural.discounts.domain.exception.Inval
 import com.corhuila.errorcapa8.travesia_natural.discounts.domain.model.Discount;
 import com.corhuila.errorcapa8.travesia_natural.discounts.domain.port.in.CreateDiscountCommand;
 import com.corhuila.errorcapa8.travesia_natural.discounts.domain.port.in.CreateDiscountUseCase;
+import com.corhuila.errorcapa8.travesia_natural.discounts.domain.port.in.DeactivateDiscountUseCase;
 import com.corhuila.errorcapa8.travesia_natural.discounts.domain.port.in.DiscountQueryUseCase;
+import com.corhuila.errorcapa8.travesia_natural.discounts.domain.port.in.ReactivateDiscountUseCase;
+import com.corhuila.errorcapa8.travesia_natural.discounts.domain.port.in.UpdateDiscountCommand;
+import com.corhuila.errorcapa8.travesia_natural.discounts.domain.port.in.UpdateDiscountUseCase;
+import com.corhuila.errorcapa8.travesia_natural.discounts.infrastructure.in.web.dto.DiscountPatchRequest;
 import com.corhuila.errorcapa8.travesia_natural.discounts.infrastructure.in.web.dto.DiscountRequest;
 import com.corhuila.errorcapa8.travesia_natural.discounts.infrastructure.in.web.dto.DiscountResponse;
 import com.corhuila.errorcapa8.travesia_natural.tenants.domain.exception.TenantInactiveException;
@@ -17,6 +22,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -30,11 +36,20 @@ import java.util.UUID;
 public class DiscountController {
 
     private final CreateDiscountUseCase createDiscountUseCase;
+    private final UpdateDiscountUseCase updateDiscountUseCase;
+    private final DeactivateDiscountUseCase deactivateDiscountUseCase;
+    private final ReactivateDiscountUseCase reactivateDiscountUseCase;
     private final DiscountQueryUseCase discountQueryUseCase;
 
     public DiscountController(CreateDiscountUseCase createDiscountUseCase,
+                               UpdateDiscountUseCase updateDiscountUseCase,
+                               DeactivateDiscountUseCase deactivateDiscountUseCase,
+                               ReactivateDiscountUseCase reactivateDiscountUseCase,
                                DiscountQueryUseCase discountQueryUseCase) {
         this.createDiscountUseCase = createDiscountUseCase;
+        this.updateDiscountUseCase = updateDiscountUseCase;
+        this.deactivateDiscountUseCase = deactivateDiscountUseCase;
+        this.reactivateDiscountUseCase = reactivateDiscountUseCase;
         this.discountQueryUseCase = discountQueryUseCase;
     }
 
@@ -62,6 +77,32 @@ public class DiscountController {
     @GetMapping("/{discountId}")
     public ResponseEntity<DiscountResponse> getById(@PathVariable String tenantId, @PathVariable UUID discountId) {
         return ResponseEntity.ok(DiscountResponse.from(discountQueryUseCase.getById(tenantId, discountId)));
+    }
+
+    @PatchMapping("/{discountId}")
+    public ResponseEntity<DiscountResponse> update(@PathVariable String tenantId, @PathVariable UUID discountId,
+                                                     @RequestBody DiscountPatchRequest request) {
+        UpdateDiscountCommand command = new UpdateDiscountCommand(
+                tenantId, discountId, request.percentage(), request.validFrom(), request.validTo(),
+                request.priority(), request.stackable(), request.cap(), request.toDiscountBase());
+
+        Discount discount = updateDiscountUseCase.updateDiscount(command);
+
+        return ResponseEntity.ok(DiscountResponse.from(discount));
+    }
+
+    @PostMapping("/{discountId}/deactivate")
+    public ResponseEntity<DiscountResponse> deactivate(@PathVariable String tenantId, @PathVariable UUID discountId) {
+        Discount discount = deactivateDiscountUseCase.deactivateDiscount(tenantId, discountId);
+
+        return ResponseEntity.ok(DiscountResponse.from(discount));
+    }
+
+    @PostMapping("/{discountId}/reactivate")
+    public ResponseEntity<DiscountResponse> reactivate(@PathVariable String tenantId, @PathVariable UUID discountId) {
+        Discount discount = reactivateDiscountUseCase.reactivateDiscount(tenantId, discountId);
+
+        return ResponseEntity.ok(DiscountResponse.from(discount));
     }
 
     @ExceptionHandler({InvalidDiscountException.class, IllegalArgumentException.class})
