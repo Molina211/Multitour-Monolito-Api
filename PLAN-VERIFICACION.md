@@ -25,7 +25,7 @@ Se esperan las tablas `reservations`, `reserved_services` y `flyway_schema_histo
 ## 4. Arrancar la aplicación
 
 ```bash
-./gradlew bootRun
+./mvnw spring-boot:run
 ```
 
 ## 5. Verificar `/health`
@@ -77,5 +77,5 @@ ninguna relación cruzada entre ellas.
 ## 9. Compilación y test por defecto
 
 ```bash
-./gradlew test
+./mvnw test
 ```

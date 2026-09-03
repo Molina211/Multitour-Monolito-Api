@@ -19,7 +19,7 @@ explícita, no como decisión de seguridad final).
 `com.corhuila.errorcapa8.travesia_natural` (sin renombrar — fuera de alcance):
 
 ```
-build.gradle                                   (+ postgresql, flyway)
+pom.xml                                   (+ postgresql, flyway)
 docker-compose.yml                             (nuevo)
 src/main/resources/application.properties      (+ datasource, flyway, jpa)
 src/main/resources/db/migration/
@@ -66,10 +66,10 @@ No se toca `docs` ni `frontend` en este plan.
 - **Flyway, no `ddl-auto`:** ya definido en la spec. Migración única `V1` para este
   corte (una sola tarea de esquema, sin fragmentarla en migraciones por tabla).
 - **Spring Security con `permitAll()` temporal:** el starter de seguridad ya está en
-  `build.gradle` (heredado del esqueleto); sin configurar bloquearía todo con login
+  `pom.xml` (heredado del esqueleto); sin configurar bloquearía todo con login
   básico. Se agrega un `SecurityConfig` explícito que permite todo y dice en un
   comentario por qué, en vez de quitar la dependencia (se necesitará para la spec de
-  JWT). Alternativa descartada: quitar `spring-boot-starter-security` del `build.gradle`
+  JWT). Alternativa descartada: quitar `spring-boot-starter-security` del `pom.xml`
   y volver a añadirlo después — genera un diff de ida y vuelta sin beneficio.
 - **`reserved_services` como tabla mínima, no agregado propio:** una fila por servicio
   reservado, con `tenant_id`, `service_reference`, `party_size`, `scheduled_date`
@@ -161,7 +161,7 @@ CREATE INDEX idx_reserved_services_reservation ON reserved_services(reservation_
 | Rechazo sin `tenantId`/`customerId`/servicios | Mismo `curl` sin cada campo por separado; esperar 400 y confirmar que no quedó fila en `reservations` |
 | `tenant_id NOT NULL` desde la primera migración | Revisar que solo existe `V1__create_reservations.sql` en el historial y que la columna es `NOT NULL` |
 | Dos tenants no se cruzan | Crear dos reservas con el mismo `customerId` y distinto `X-Tenant-Id`; consultar ambas filas y confirmar `tenant_id` distinto sin relación entre sí |
-| Compila y el test por defecto pasa | `./gradlew test` |
+| Compila y el test por defecto pasa | `./mvnw test` |
 
 Todo el detalle operativo (comandos exactos, orden de pasos) vive en
 `PLAN-VERIFICACION.md`, generado como la tarea T12 de `tasks.md`.
