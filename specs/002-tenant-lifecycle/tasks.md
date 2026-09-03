@@ -22,7 +22,7 @@ lotes de 2-3 tareas, commit + push sin pedir permiso en cada uno, siempre que
 - [x] T12 — `TenantController` (`POST /api/tenants`, `POST /api/tenants/{id}/deactivate`, `POST /api/tenants/{id}/reactivate`, `GET /api/tenants`, `GET /api/tenants/{id}`), DTOs de request/response, mapeo de excepciones a 400/404/409 · repo: backend · ~30 min · depende de T08, T09, T10, T11
 - [x] T13 — `AuditController` (`GET /api/audit`) · repo: backend · ~15 min · depende de T07, T11
   **— fin lote 5 (T11-T13): commit + push —**
-- [ ] T14 — Agrega la sección "002 — Tenant lifecycle" a `PLAN-VERIFICACION.md` con los `curl` y `psql` de cada criterio de aceptación · repo: backend · ~25 min · depende de T12, T13
-- [ ] T15 — Verifica que el contexto de Spring levanta con todos los beans nuevos y que los tests existentes (incluidos los de spec 001) siguen pasando (`./mvnw test`) · repo: backend · ~15 min · depende de T12, T13
-- [ ] T16 — Verifica los criterios de aceptación de `spec.md` ejecutando la sección nueva de `PLAN-VERIFICACION.md` de punta a punta · repo: backend · ~25 min · depende de T14, T15
+- [x] T14 — Agrega la sección "002 — Tenant lifecycle" a `PLAN-VERIFICACION.md` con los `curl` y `psql` de cada criterio de aceptación · repo: backend · ~25 min · depende de T12, T13
+- [x] T15 — Verifica que el contexto de Spring levanta con todos los beans nuevos y que los tests existentes (incluidos los de spec 001) siguen pasando (`./mvnw test`) · repo: backend · ~15 min · depende de T12, T13
+- [x] T16 — Verifica los criterios de aceptación de `spec.md` ejecutando la sección nueva de `PLAN-VERIFICACION.md` de punta a punta · repo: backend · ~25 min · depende de T14, T15
   **— fin lote 6 (T14-T16): commit + push —**

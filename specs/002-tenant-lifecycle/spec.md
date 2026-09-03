@@ -1,6 +1,6 @@
 # 002 — Ciclo de vida del Tenant + primer Administrador
 
-**Estado:** APROBADA
+**Estado:** TERMINADA
 **Fecha:** 2026-09-02
 **Repos afectados:** backend
 **HU relacionada:** HU-TEN-001 (principal, FR-019)
@@ -61,25 +61,25 @@ contra qué tenant o usuario validar credenciales.
 
 ## Criterios de aceptación
 
-- [ ] `POST /api/tenants` con `tenantId`, `commercialName` y los datos del primer
+- [x] `POST /api/tenants` con `tenantId`, `commercialName` y los datos del primer
       Administrador (`name`, `email`, `password`, `passwordConfirmation`) devuelve
       `201 Created`, el tenant queda en `Activo`, y la membresía Administrator queda
       persistida con la contraseña hasheada (nunca en texto plano).
-- [ ] `POST /api/tenants` con `tenantId` ya existente devuelve `400`/`409` sin crear
+- [x] `POST /api/tenants` con `tenantId` ya existente devuelve `400`/`409` sin crear
       nada ni duplicar el tenant.
-- [ ] `POST /api/tenants` sin `password` igual a `passwordConfirmation` es rechazado
+- [x] `POST /api/tenants` sin `password` igual a `passwordConfirmation` es rechazado
       sin persistir nada.
-- [ ] `POST /api/tenants/{tenantId}/deactivate` sin `reason` es rechazado; con
+- [x] `POST /api/tenants/{tenantId}/deactivate` sin `reason` es rechazado; con
       `reason` pasa el tenant a `Inactivo` y genera un registro en `audit_records`
       con actor, tenant, acción, motivo y fecha/hora.
-- [ ] `POST /api/tenants/{tenantId}/reactivate` sobre un tenant `Inactivo` lo pasa a
+- [x] `POST /api/tenants/{tenantId}/reactivate` sobre un tenant `Inactivo` lo pasa a
       `Activo` únicamente por esta operación explícita (nunca como efecto colateral
       de otra acción) y genera su propio registro de auditoría.
-- [ ] `GET /api/tenants/{tenantId}` sobre un tenant `Inactivo` sigue devolviendo sus
+- [x] `GET /api/tenants/{tenantId}` sobre un tenant `Inactivo` sigue devolviendo sus
       datos e historial (`INV-TEN-002`: la desactivación no borra evidencia).
-- [ ] `GET /api/audit` devuelve las tres acciones de ciclo de vida realizadas en las
+- [x] `GET /api/audit` devuelve las tres acciones de ciclo de vida realizadas en las
       pruebas anteriores, cada una con actor, tenant, acción, motivo y fecha/hora.
-- [ ] El proyecto compila y los tests existentes (incluido `contextLoads` y los de
+- [x] El proyecto compila y los tests existentes (incluido `contextLoads` y los de
       spec 001) siguen pasando.
 
 ## Impacto en multitenencia
