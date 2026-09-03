@@ -1,6 +1,7 @@
 # 001 — Walking Skeleton del Backend + Reservation persistida
 
-**Estado:** APROBADA
+**Estado:** TERMINADA (reconciliada 2026-09-03: sus criterios originales quedaron
+superados por la spec 006 — ver nota antes de "Criterios de aceptación")
 **Fecha:** 2026-09-02
 **Repos afectados:** backend
 **HU relacionada:** HU-RES-001 (principal); HU-RES-002, HU-RES-003, HU-RES-004, HU-RES-008, HU-RES-009 quedan fuera de este corte pero definen la forma futura del agregado (ver "Fuera de alcance")
@@ -65,24 +66,37 @@ solo en el papel.
   una spec necesite un contexto documental (p. ej. Reports and Dashboard).
 - CI/CD, despliegue a AWS, y cualquier configuración de GitHub (regla 6).
 
+## Nota de reconciliación (2026-09-03)
+
+Esta spec nunca se marcó `TERMINADA` en su momento, y sus criterios describen un
+contrato que ya no existe: `tenantId` como `UUID` recibido por header `X-Tenant-Id`, y
+`POST /api/reservations` sin tenant en la URL. La spec 006 (`reservation-query`)
+reemplazó ambas cosas explícitamente (tenantId pasa a `String`/slug en la URL, la ruta
+se reubica a `POST /api/tenants/{tenantId}/reservations`) y sus propios criterios de
+aceptación ya verifican el walking skeleton bajo el contrato nuevo. Los checkboxes de
+abajo se marcan como cumplidos en su momento bajo el contrato original (evidencia: specs
+006 y 007 construyen sobre este walking skeleton y sus tests pasan), no porque el
+contrato original siga vigente hoy — para el contrato vigente, ver `spec.md` de 006.
+
 ## Criterios de aceptación
 
-- [ ] Con `docker-compose up`, un contenedor PostgreSQL queda disponible y accesible
+- [x] Con `docker-compose up`, un contenedor PostgreSQL queda disponible y accesible
       desde la aplicación Spring Boot.
-- [ ] `GET /health` responde `200 OK` con la app corriendo contra ese contenedor.
-- [ ] `POST` de creación de reserva con `tenantId`, `customerId`, `projectedValue` y al
+- [x] `GET /health` responde `200 OK` con la app corriendo contra ese contenedor.
+- [x] `POST` de creación de reserva con `tenantId`, `customerId`, `projectedValue` y al
       menos un servicio reservado (dato mínimo) devuelve la reserva creada con
       `reservationId` generado y `reservationStatus = Pendiente de pago`, y el registro
       queda verificable directamente en la tabla `reservations` de Postgres.
-- [ ] La misma operación sin `tenantId`, sin `customerId` o sin ningún servicio
+      (Contrato original vía header `X-Tenant-Id`; reemplazado por spec 006.)
+- [x] La misma operación sin `tenantId`, sin `customerId` o sin ningún servicio
       reservado es rechazada sin persistir nada (HU-RES-001 Escenario 2).
-- [ ] La tabla `reservations` tiene `tenant_id` como columna `NOT NULL` desde su primera
+- [x] La tabla `reservations` tiene `tenant_id` como columna `NOT NULL` desde su primera
       migración — no existe una versión de la tabla sin esa columna en el historial de
       migraciones.
-- [ ] Dos reservas con el mismo `customerId` pero distinto `tenantId` quedan como filas
+- [x] Dos reservas con el mismo `customerId` pero distinto `tenantId` quedan como filas
       independientes sin ninguna relación cruzada (prueba manual o automatizada mínima
       de que el filtro por `tenantId` está presente en la consulta).
-- [ ] El proyecto compila y el test por defecto de Spring Initializr sigue pasando.
+- [x] El proyecto compila y el test por defecto de Spring Initializr sigue pasando.
 
 ## Impacto en multitenencia
 
