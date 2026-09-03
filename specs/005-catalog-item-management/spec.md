@@ -1,6 +1,6 @@
 # 005 — Gestión de ítems del catálogo operativo
 
-**Estado:** APROBADA
+**Estado:** TERMINADA
 **Fecha:** 2026-09-03
 **Repos afectados:** backend (requiere un cambio futuro en frontend, documentado pero
 no ejecutado aquí — ver "Riesgos y decisiones abiertas")
@@ -71,22 +71,22 @@ capacidad de hospedaje contra un dato real, no contra un valor quemado en el Fro
 
 ## Criterios de aceptación
 
-- [ ] `POST /api/tenants/{tenantId}/catalog-items` con datos válidos de un tenant
+- [x] `POST /api/tenants/{tenantId}/catalog-items` con datos válidos de un tenant
       `Activo` devuelve `201` con el ítem creado, `active: true`.
-- [ ] Crear un `LODGING` sin `capacity` o con `capacity <= 0` devuelve `400` sin
+- [x] Crear un `LODGING` sin `capacity` o con `capacity <= 0` devuelve `400` sin
       persistir nada (RN-HOS-003).
-- [ ] `GET /api/tenants/{tenantId}/catalog-items` devuelve todos los ítems del tenant
+- [x] `GET /api/tenants/{tenantId}/catalog-items` devuelve todos los ítems del tenant
       (activos e inactivos), nunca ítems de otro tenant.
-- [ ] `GET /api/tenants/{tenantId}/catalog-items/{itemId}` de un ítem de otro tenant
+- [x] `GET /api/tenants/{tenantId}/catalog-items/{itemId}` de un ítem de otro tenant
       devuelve `404` (aislamiento, no filtra existencia cruzada).
-- [ ] `PATCH /api/tenants/{tenantId}/catalog-items/{itemId}` actualiza los campos
+- [x] `PATCH /api/tenants/{tenantId}/catalog-items/{itemId}` actualiza los campos
       enviados y conserva los no enviados.
-- [ ] `POST .../{itemId}/deactivate` pone `active: false` sin borrar la fila; el ítem
+- [x] `POST .../{itemId}/deactivate` pone `active: false` sin borrar la fila; el ítem
       sigue siendo consultable por `GET /{itemId}` (trazabilidad histórica).
-- [ ] `POST .../{itemId}/reactivate` vuelve a poner `active: true`.
-- [ ] Operar sobre un `tenantId` inexistente devuelve `404`; sobre un tenant `Inactivo`
+- [x] `POST .../{itemId}/reactivate` vuelve a poner `active: true`.
+- [x] Operar sobre un `tenantId` inexistente devuelve `404`; sobre un tenant `Inactivo`
       devuelve `409`.
-- [ ] El proyecto compila y los tests existentes (spec 001-004) siguen pasando.
+- [x] El proyecto compila y los tests existentes (spec 001-004) siguen pasando.
 
 ## Impacto en multitenencia
 
