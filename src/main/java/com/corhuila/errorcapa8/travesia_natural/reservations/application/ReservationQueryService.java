@@ -3,6 +3,7 @@ package com.corhuila.errorcapa8.travesia_natural.reservations.application;
 import com.corhuila.errorcapa8.travesia_natural.reservations.domain.exception.ReservationNotFoundException;
 import com.corhuila.errorcapa8.travesia_natural.reservations.domain.model.PaymentStatus;
 import com.corhuila.errorcapa8.travesia_natural.reservations.domain.model.Reservation;
+import com.corhuila.errorcapa8.travesia_natural.reservations.domain.model.ReservationStatus;
 import com.corhuila.errorcapa8.travesia_natural.reservations.domain.port.in.ReservationQueryUseCase;
 import com.corhuila.errorcapa8.travesia_natural.reservations.domain.port.out.ReservationRepositoryPort;
 import com.corhuila.errorcapa8.travesia_natural.tenants.domain.exception.TenantInactiveException;
@@ -48,6 +49,15 @@ public class ReservationQueryService implements ReservationQueryUseCase {
 
         return reservationRepositoryPort.findAllByTenantId(tenantId).stream()
                 .filter(reservation -> reservation.paymentStatus() == PaymentStatus.EN_VALIDACION)
+                .toList();
+    }
+
+    @Override
+    public List<Reservation> listPendingExecutionByTenant(String tenantId) {
+        requireActiveTenant(tenantId);
+
+        return reservationRepositoryPort.findAllByTenantId(tenantId).stream()
+                .filter(reservation -> reservation.reservationStatus() == ReservationStatus.CONFIRMADA)
                 .toList();
     }
 
