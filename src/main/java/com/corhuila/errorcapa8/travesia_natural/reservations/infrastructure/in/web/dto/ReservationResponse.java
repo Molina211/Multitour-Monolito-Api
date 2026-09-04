@@ -12,7 +12,9 @@ public record ReservationResponse(UUID reservationId, String tenantId, String cu
                                    BigDecimal finalValue, BigDecimal pendingBalance, BigDecimal creditBalance,
                                    String reservationStatus, String paymentStatus, String paymentMethod,
                                    Instant createdAt, BigDecimal pendingTransferAmount,
-                                   String transferSupportReference) {
+                                   String transferSupportReference, String cancellationReason, String cancelledBy,
+                                   Instant cancelledAt, BigDecimal refundedAmount, String refundReason,
+                                   String refundedBy, String refundMethod, Instant refundedAt) {
 
     public static ReservationResponse from(Reservation reservation) {
         return new ReservationResponse(
@@ -29,6 +31,14 @@ public record ReservationResponse(UUID reservationId, String tenantId, String cu
                 reservation.paymentMethod(),
                 reservation.createdAt(),
                 reservation.pendingTransferAmount(),
-                reservation.transferSupportReference());
+                reservation.transferSupportReference(),
+                reservation.cancellationReason(),
+                reservation.cancelledBy(),
+                reservation.cancelledAt(),
+                reservation.refundedAmount(),
+                reservation.refundReason(),
+                reservation.refundedBy(),
+                reservation.refundMethod(),
+                reservation.refundedAt());
     }
 }

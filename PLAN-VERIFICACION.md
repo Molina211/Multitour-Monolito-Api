@@ -1294,3 +1294,259 @@ cerrar la spec:
    el segundo guardado fallaba (como en el bug 2), la reserva quedaba en
    `EN_EJECUCION` sin ejecución asociada, sin forma de reintentar. Se agregó
    `@Transactional` a `RegisterExecutionService.registerExecution()`.
+
+# Plan de verificación — 011 Cancelación de reserva antes de ejecución
+
+Corresponde a `specs/011-reservation-cancellation/`. Requiere Postgres arriba, la app
+corriendo, el tenant `travesia-natural` `Activo`, y un token válido de
+`laura.gomez@example.com` (sección "007", pasos 1-2) para crear reservas nuevas.
+
+```bash
+TOKEN="<accessToken de la sección 007, paso 1>"
+```
+
+## 1. Cancelar una reserva `Pendiente de pago` sin pagos (`200`)
+
+```bash
+curl -s -X POST http://localhost:8080/api/tenants/travesia-natural/reservations \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer ${TOKEN}" \
+  -d '{ "projectedValue": 200000, "reservedServices": [{ "serviceReference": "tour-laguna-verde" }] }'
+```
+
+Guardar el `reservationId` como `RES_K`, sin registrar ningún pago. Cancelarla:
+
+```bash
+curl -i -X POST http://localhost:8080/api/tenants/travesia-natural/reservations/${RES_K}/cancel \
+  -H "Content-Type: application/json" \
+  -d '{ "reason": "Cliente desistio del viaje", "actorId": "operador-1" }'
+```
+
+Se espera `200 OK` con `reservationStatus: "Cancelada"`, `creditBalance: 0` y
+`paymentStatus: "Sin pago"` (sin cambios).
+
+## 2. Cancelar una reserva `Confirmada` con el valor completo pagado (`200`, saldo a favor)
+
+Crear `RES_L` igual que en el paso 1 y pagarla en efectivo (igual que sección "009",
+paso 1) para llevarla a `Confirmada`:
+
+```bash
+curl -i -X POST http://localhost:8080/api/tenants/travesia-natural/reservations/${RES_L}/payments \
+  -H "Content-Type: application/json" \
+  -d '{ "method": "EFECTIVO", "amount": 200000 }'
+```
+
+Cancelarla:
+
+```bash
+curl -i -X POST http://localhost:8080/api/tenants/travesia-natural/reservations/${RES_L}/cancel \
+  -H "Content-Type: application/json" \
+  -d '{ "reason": "Cliente desistio del viaje", "actorId": "operador-1" }'
+```
+
+Se espera `200 OK` con `reservationStatus: "Cancelada"`, `creditBalance: 200000` y
+`paymentStatus: "Saldo a favor pendiente"`.
+
+## 3. Cancelar una reserva con un abono parcial (`200`, saldo a favor parcial)
+
+Crear `RES_M` igual que en el paso 1 (`projectedValue: 200000`) y abonar solo una
+parte:
+
+```bash
+curl -i -X POST http://localhost:8080/api/tenants/travesia-natural/reservations/${RES_M}/payments \
+  -H "Content-Type: application/json" \
+  -d '{ "method": "ABONO", "amount": 80000 }'
+```
+
+Cancelarla:
+
+```bash
+curl -i -X POST http://localhost:8080/api/tenants/travesia-natural/reservations/${RES_M}/cancel \
+  -H "Content-Type: application/json" \
+  -d '{ "reason": "Cliente desistio del viaje", "actorId": "operador-1" }'
+```
+
+Se espera `200 OK` con `creditBalance: 80000` (solo lo efectivamente abonado, no los
+200000 del valor total).
+
+## 4. Cancelar sin motivo (`400`)
+
+```bash
+curl -i -X POST http://localhost:8080/api/tenants/travesia-natural/reservations/${RES_K}/cancel \
+  -H "Content-Type: application/json" \
+  -d '{ "actorId": "operador-1" }'
+```
+
+(Usar una reserva nueva sin cancelar todavía si `RES_K` ya quedó `Cancelada`.) Se
+espera `400 Bad Request` con `{"error":"validation_error", ...}`.
+
+## 5. Cancelar sobre un estado inválido (`409`)
+
+Repetir sobre `RES_K` (ya `Cancelada` desde el paso 1) el mismo `curl` del paso 1: se
+espera `409 Conflict` con `{"error":"reservation_not_cancellable", ...}`, y la reserva
+no cambia. Repetir el mismo caso llevando otra reserva hasta `En ejecucion` (igual que
+sección "010", paso 1) e intentando cancelarla: mismo resultado.
+
+## 6. Cancelar con una transferencia pendiente de decidir (`409`)
+
+Crear `RES_N` igual que en el paso 1 y registrar una transferencia con soporte (igual
+que sección "009"):
+
+```bash
+curl -i -X POST http://localhost:8080/api/tenants/travesia-natural/reservations/${RES_N}/payments \
+  -H "Content-Type: application/json" \
+  -d '{ "method": "TRANSFERENCIA", "amount": 200000, "supportReference": "comprobante-001" }'
+```
+
+Intentar cancelarla sin resolver la transferencia:
+
+```bash
+curl -i -X POST http://localhost:8080/api/tenants/travesia-natural/reservations/${RES_N}/cancel \
+  -H "Content-Type: application/json" \
+  -d '{ "reason": "Cliente desistio del viaje", "actorId": "operador-1" }'
+```
+
+Se espera `409 Conflict` con `{"error":"reservation_not_cancellable", ...}`, y la
+reserva no cambia.
+
+## 7. Consultar una reserva cancelada (`200`, motivo y actor visibles)
+
+```bash
+curl -s http://localhost:8080/api/tenants/travesia-natural/reservations/${RES_L}
+```
+
+Se espera `200 OK` con `reservationStatus: "Cancelada"`, `creditBalance: 200000`,
+`paymentStatus: "Saldo a favor pendiente"`, `cancellationReason: "Cliente desistio del
+viaje"` y `cancelledBy: "operador-1"`.
+
+## 8. Tenant inexistente (`404`) y tenant `Inactivo` (`409`)
+
+```bash
+curl -i -X POST http://localhost:8080/api/tenants/no-existe/reservations/${RES_K}/cancel \
+  -H "Content-Type: application/json" \
+  -d '{ "reason": "Cliente desistio del viaje", "actorId": "operador-1" }'
+```
+
+Se espera `404 Not Found`. Luego, desactivar `travesia-natural` (paso 5 de la sección
+"002") y repetir la cancelación: se espera `409 Conflict` con
+`{"error":"tenant_inactive", ...}`. Reactivar el tenant al terminar (paso 6 de esa
+sección).
+
+## 9. Compilación y tests (spec 001 a spec 011)
+
+```bash
+./mvnw test
+```
+
+Deben seguir en verde `contextLoads` y los tests existentes, sin regresiones.
+
+# Plan de verificación — 012 Ejecución de devolución sobre saldo a favor
+
+Corresponde a `specs/012-reservation-refund-execution/`. Requiere Postgres arriba, la
+app corriendo, el tenant `travesia-natural` `Activo`, y un token válido de
+`laura.gomez@example.com` (sección "007", pasos 1-2) para crear reservas nuevas. Usa
+`RES_L`, `RES_M` y `RES_K` ya generadas en la sección "011" (paga/cancela igual que ahí
+si se ejecuta esta sección de forma aislada).
+
+```bash
+TOKEN="<accessToken de la sección 007, paso 1>"
+```
+
+## 1. Ejecutar devolución total (`200`, `creditBalance` en cero)
+
+`RES_L` viene de la sección "011" paso 2: `Cancelada`, `creditBalance: 200000`,
+`paymentStatus: "Saldo a favor pendiente"`. Ejecutar la devolución completa:
+
+```bash
+curl -i -X POST http://localhost:8080/api/tenants/travesia-natural/reservations/${RES_L}/refund \
+  -H "Content-Type: application/json" \
+  -d '{ "amount": 200000, "reason": "Devolucion acordada con el cliente", "actorId": "admin-1", "method": "Transferencia" }'
+```
+
+Se espera `200 OK` con `creditBalance: 0`, `paymentStatus: "Devuelto parcial o
+total"`, `refundedAmount: 200000`, `refundReason`, `refundedBy: "admin-1"`,
+`refundMethod: "Transferencia"` y `refundedAt` presentes.
+
+## 2. Ejecutar devolución parcial (`200`, `creditBalance` reducido, no en cero)
+
+`RES_M` viene de la sección "011" paso 3: `Cancelada`, `creditBalance: 80000`,
+`paymentStatus: "Saldo a favor pendiente"`. Devolver solo una parte:
+
+```bash
+curl -i -X POST http://localhost:8080/api/tenants/travesia-natural/reservations/${RES_M}/refund \
+  -H "Content-Type: application/json" \
+  -d '{ "amount": 30000, "reason": "Devolucion parcial acordada", "actorId": "admin-1", "method": "Efectivo" }'
+```
+
+Se espera `200 OK` con `creditBalance: 50000` (no en cero) y `paymentStatus: "Devuelto
+parcial o total"`.
+
+## 3. Devolución con monto mayor al `creditBalance` disponible (`400`)
+
+Crear `RES_P` igual que en la sección "011" paso 2 (pagar en efectivo el valor
+completo y cancelarla), quedando `creditBalance: 200000`. Intentar devolver más de lo
+disponible:
+
+```bash
+curl -i -X POST http://localhost:8080/api/tenants/travesia-natural/reservations/${RES_P}/refund \
+  -H "Content-Type: application/json" \
+  -d '{ "amount": 999999, "reason": "Devolucion acordada", "actorId": "admin-1", "method": "Efectivo" }'
+```
+
+Se espera `400 Bad Request` con `{"error":"validation_error", ...}`, y la reserva no
+cambia (`creditBalance` sigue en `200000`).
+
+## 4. Devolución sin motivo o sin actor (`400`)
+
+Sobre la misma `RES_P` (sin modificar por el paso anterior):
+
+```bash
+curl -i -X POST http://localhost:8080/api/tenants/travesia-natural/reservations/${RES_P}/refund \
+  -H "Content-Type: application/json" \
+  -d '{ "amount": 200000, "actorId": "admin-1", "method": "Efectivo" }'
+```
+
+Se espera `400 Bad Request` con `{"error":"validation_error", ...}` (falta `reason`).
+Repetir omitiendo `actorId` en su lugar: mismo resultado.
+
+## 5. Devolución sobre una reserva sin `Saldo a favor pendiente` (`409`)
+
+Tres casos, todos deben devolver `409 Conflict` con
+`{"error":"reservation_not_refundable", ...}` sin modificar la reserva:
+
+- `RES_K` (sección "011" paso 1: `Cancelada` sin pagos, `paymentStatus: "Sin pago"`).
+- Una reserva `Confirmada` sin cancelar (ej. crear una nueva y pagarla en efectivo,
+  igual que sección "009" paso 1, sin cancelarla).
+- `RES_L`, ya `Devuelto parcial o total` desde el paso 1 de esta sección (repetir el
+  mismo `curl` del paso 1).
+
+## 6. Consultar una reserva con devolución ejecutada (`200`, campos visibles)
+
+```bash
+curl -s http://localhost:8080/api/tenants/travesia-natural/reservations/${RES_L}
+```
+
+Se espera `200 OK` con `paymentStatus: "Devuelto parcial o total"`,
+`creditBalance: 0`, `refundedAmount: 200000`, `refundReason`,
+`refundedBy: "admin-1"`, `refundMethod: "Transferencia"` y `refundedAt`.
+
+## 7. Tenant inexistente (`404`) y tenant `Inactivo` (`409`)
+
+```bash
+curl -i -X POST http://localhost:8080/api/tenants/no-existe/reservations/${RES_M}/refund \
+  -H "Content-Type: application/json" \
+  -d '{ "amount": 1000, "reason": "Devolucion", "actorId": "admin-1", "method": "Efectivo" }'
+```
+
+Se espera `404 Not Found`. Luego, desactivar `travesia-natural` (paso 5 de la sección
+"002") y repetir la devolución: se espera `409 Conflict` con
+`{"error":"tenant_inactive", ...}`. Reactivar el tenant al terminar (paso 6 de esa
+sección).
+
+## 8. Compilación y tests (spec 001 a spec 012)
+
+```bash
+./mvnw test
+```
+
+Deben seguir en verde `contextLoads` y los tests existentes, sin regresiones.
