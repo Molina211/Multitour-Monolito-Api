@@ -1852,9 +1852,11 @@ curl -i -X POST http://localhost:8080/api/tenants/travesia-natural/cash/${CASH_I
   -d '{ "type": null, "amount": 1000, "concept": "tipo null", "actorId": "admin-1" }'
 ```
 
-Ambas deben devolver `400` con `{"error":"validation_error","message":"movement type is
-required"}`. Un `type` inexistente en el enum (ej. `"FOO"`) debe seguir devolviendo
-`400` con el mensaje de `IllegalArgumentException` (ese caso ya funcionaba antes).
+Ambas deben devolver `400` con `{"error":"validation_error","message":"Unknown
+CashMovementType label: null"}` — mensaje actualizado tras el cambio a `fromLabel()`
+(ver sección más abajo, "Alineación de `CashMovementType` con el contrato del
+Frontend"). Un `type` inexistente (ej. `"FOO"`) debe seguir devolviendo `400` con el
+mismo tipo de mensaje (`"Unknown CashMovementType label: FOO"`).
 
 ## 2. Consolidación mensual sigue devolviendo los mismos valores
 
@@ -1868,6 +1870,79 @@ Debe seguir devolviendo `200 OK` con los mismos campos y valores que antes del c
 petición.
 
 ## 3. Compilación y tests
+
+```bash
+./mvnw test
+```
+
+Deben seguir en verde `contextLoads` y los tests existentes, sin regresiones.
+
+# Plan de verificación — Alineación de `CashMovementType` con el contrato del Frontend
+
+Hallazgo de `/code-review`: el enum `CashMovementType` (`INGRESO`/`PAGO`/`GASTO`) no
+coincidía con los literales que ya usa `operator-cash.service.ts` en la rama `develop`
+del Frontend (`'Ingreso'`/`'Pago operacional'`/`'Gasto'`/`'Devolución'`, sin integración
+HTTP todavía — trabajo de Fernanda Robayo, ver regla 11 de CLAUDE.md, solo lectura).
+Decisión: hasta que Backend y Frontend completen su implementación por separado, no debe
+haber ningún llamado HTTP real entre ambos; mientras tanto, se alinea el Backend al
+contrato ya definido en el Frontend para evitar el desfase cuando llegue la integración.
+
+Se aplicó el mismo patrón `label()`/`fromLabel()` que ya usan `ReservationStatus` y
+`PaymentStatus`: el enum interno de Java conserva sus constantes (`INGRESO`, `PAGO`,
+`GASTO`), pero expone/acepta el literal en español como valor de intercambio (JSON y
+columna `type` en `cash_movements`). No se agrega `DEVOLUCION`: sigue sin registrarse a
+mano, se calcula en vivo desde las devoluciones ejecutadas (spec 012), igual que antes.
+No se tocó ningún archivo del Frontend.
+
+Efecto colateral: las filas de prueba de esta sesión en la base de desarrollo
+(`cash_movements.type` en formato `INGRESO`/`PAGO`/`GASTO`) se migraron a mano a
+`Ingreso`/`Pago operacional`/`Gasto` vía `UPDATE` directo (dato sintético de pruebas
+propias, no hay entorno productivo ni datos de terceros afectados).
+
+## 1. Movimiento con el literal del Frontend es aceptado
+
+```bash
+CASH_ID=$(curl -s -X POST http://localhost:8080/api/tenants/travesia-natural/cash \
+  -H "Content-Type: application/json" \
+  -d '{ "businessDate": "2026-09-11", "baseAmount": 5000, "actorId": "admin-1" }' \
+  | grep -o '"cashRegisterId":"[^"]*"' | cut -d'"' -f4)
+
+curl -i -X POST http://localhost:8080/api/tenants/travesia-natural/cash/${CASH_ID}/movements \
+  -H "Content-Type: application/json" \
+  -d '{ "type": "Ingreso", "amount": 1000, "concept": "prueba", "actorId": "admin-1" }'
+
+curl -i -X POST http://localhost:8080/api/tenants/travesia-natural/cash/${CASH_ID}/movements \
+  -H "Content-Type: application/json" \
+  -d '{ "type": "Pago operacional", "amount": 200, "concept": "prueba", "actorId": "admin-1" }'
+
+curl -s "http://localhost:8080/api/tenants/travesia-natural/cash?businessDate=2026-09-11"
+```
+
+Ambos `POST` devuelven `201`. La consulta final debe mostrar `movements[].type` como
+`"Ingreso"` y `"Pago operacional"` (no `"INGRESO"`/`"PAGO"`).
+
+## 2. El formato viejo (nombre del enum de Java) ya no es válido
+
+```bash
+curl -i -X POST http://localhost:8080/api/tenants/travesia-natural/cash/${CASH_ID}/movements \
+  -H "Content-Type: application/json" \
+  -d '{ "type": "INGRESO", "amount": 100, "concept": "formato viejo", "actorId": "admin-1" }'
+```
+
+Debe devolver `400` (`"Unknown CashMovementType label: INGRESO"`) — señal de que ya no
+conviven dos formatos distintos para el mismo dato.
+
+## 3. Historial y consolidación siguen leyendo sin error tras la migración de datos
+
+```bash
+curl -s http://localhost:8080/api/tenants/travesia-natural/cash/history
+curl -s "http://localhost:8080/api/tenants/travesia-natural/cash/consolidation?period=2026-09"
+```
+
+Ambos deben seguir devolviendo `200 OK`, incluyendo las jornadas cerradas con
+movimientos migrados al nuevo formato.
+
+## 4. Compilación y tests
 
 ```bash
 ./mvnw test
