@@ -8,6 +8,7 @@ import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.YearMonth;
 import java.time.ZoneOffset;
+import java.util.List;
 import java.util.Objects;
 
 /**
@@ -35,9 +36,14 @@ public class RefundsTotalCalculator {
                 .reduce(BigDecimal.ZERO, BigDecimal::add);
     }
 
-    /** Igual que {@link #totalForBusinessDate}, agregado por mes (consolidación, RF-012). */
-    public BigDecimal totalForPeriod(String tenantId, YearMonth period) {
-        return reservationRepositoryPort.findAllByTenantId(tenantId).stream()
+    /**
+     * Igual que {@link #totalForBusinessDate}, agregado por mes (consolidación, RF-012).
+     * Recibe las reservas ya cargadas en vez de {@code tenantId} porque el llamador
+     * ({@code MonthlyCashConsolidationService}) también las necesita para calcular
+     * cancelaciones del período: evita consultarlas dos veces en la misma petición.
+     */
+    public BigDecimal totalForPeriod(List<Reservation> reservations, YearMonth period) {
+        return reservations.stream()
                 .filter(reservation -> reservation.refundedAt() != null)
                 .filter(reservation -> YearMonth.from(reservation.refundedAt().atZone(ZoneOffset.UTC).toLocalDate())
                         .equals(period))

@@ -8,6 +8,7 @@ import com.corhuila.errorcapa8.travesia_natural.cash.domain.port.in.MonthlyCashC
 import com.corhuila.errorcapa8.travesia_natural.cash.domain.port.out.CashRegisterRepositoryPort;
 import com.corhuila.errorcapa8.travesia_natural.operations.domain.model.OperationCost;
 import com.corhuila.errorcapa8.travesia_natural.operations.domain.port.out.OperationCostRepositoryPort;
+import com.corhuila.errorcapa8.travesia_natural.reservations.domain.model.Reservation;
 import com.corhuila.errorcapa8.travesia_natural.reservations.domain.model.ReservationStatus;
 import com.corhuila.errorcapa8.travesia_natural.reservations.domain.port.out.ReservationRepositoryPort;
 import org.springframework.stereotype.Service;
@@ -49,10 +50,13 @@ public class MonthlyCashConsolidationService implements MonthlyCashConsolidation
         BigDecimal ingresos = sumMovements(closedInPeriod, CashMovementType.INGRESO);
         BigDecimal pagosOperacionales = sumMovements(closedInPeriod, CashMovementType.PAGO);
         BigDecimal gastos = sumMovements(closedInPeriod, CashMovementType.GASTO);
-        BigDecimal devoluciones = refundsTotalCalculator.totalForPeriod(tenantId, period);
+
+        List<Reservation> reservations = reservationRepositoryPort.findAllByTenantId(tenantId);
+
+        BigDecimal devoluciones = refundsTotalCalculator.totalForPeriod(reservations, period);
         BigDecimal total = ingresos.subtract(pagosOperacionales).subtract(gastos).subtract(devoluciones);
 
-        long cancelaciones = reservationRepositoryPort.findAllByTenantId(tenantId).stream()
+        long cancelaciones = reservations.stream()
                 .filter(reservation -> reservation.reservationStatus() == ReservationStatus.CANCELADA)
                 .filter(reservation -> reservation.cancelledAt() != null)
                 .filter(reservation -> YearMonth.from(reservation.cancelledAt().atZone(ZoneOffset.UTC).toLocalDate())

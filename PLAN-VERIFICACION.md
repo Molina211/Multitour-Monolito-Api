@@ -1812,3 +1812,65 @@ cerradas del tenant, movimientos en orden, sin errores de mapeo.
 ```
 
 Deben seguir en verde `contextLoads` y los tests existentes, sin regresiones.
+
+# Plan de verificación — NPE en movimientos sin `type` + doble consulta en consolidación
+
+Dos hallazgos de `/code-review` sobre spec 013, pendientes desde la corrección de
+persistencia:
+
+1. `CashController.registerMovement` llamaba `CashMovementType.valueOf(request.type())`
+   directamente sobre el valor crudo del DTO. Si `type` venía ausente o `null` en el
+   JSON, `Enum.valueOf(_, null)` lanza `NullPointerException` (no
+   `IllegalArgumentException`), sin `@ExceptionHandler` que la capture: la API devolvía
+   `500` en vez del `400` documentado en la spec. `CashMovement` ya validaba
+   `type == null` correctamente en su constructor compacto — el problema era que nunca
+   llegaba a ejecutarse. Corregido dejando pasar `null` a `RegisterCashMovementCommand`
+   en vez de invocar `valueOf` sobre un valor nulo, para que la validación de dominio
+   (única fuente de verdad) haga su trabajo.
+2. `MonthlyCashConsolidationService.getMonthlyConsolidation()` consultaba
+   `reservationRepositoryPort.findAllByTenantId(tenantId)` dos veces en la misma
+   petición: una directa (cancelaciones) y otra dentro de
+   `RefundsTotalCalculator.totalForPeriod` (devoluciones). Corregido consultando una
+   sola vez y reutilizando la misma lista para ambos cálculos;
+   `RefundsTotalCalculator.totalForPeriod` ahora recibe la lista ya cargada en vez de
+   `tenantId` (único llamador, sin otros call sites afectados).
+
+## 1. Movimiento sin `type` devuelve 400, no 500
+
+```bash
+CASH_ID=$(curl -s -X POST http://localhost:8080/api/tenants/travesia-natural/cash \
+  -H "Content-Type: application/json" \
+  -d '{ "businessDate": "2026-09-09", "baseAmount": 5000, "actorId": "admin-1" }' \
+  | grep -o '"cashRegisterId":"[^"]*"' | cut -d'"' -f4)
+
+curl -i -X POST http://localhost:8080/api/tenants/travesia-natural/cash/${CASH_ID}/movements \
+  -H "Content-Type: application/json" \
+  -d '{ "amount": 1000, "concept": "sin tipo", "actorId": "admin-1" }'
+
+curl -i -X POST http://localhost:8080/api/tenants/travesia-natural/cash/${CASH_ID}/movements \
+  -H "Content-Type: application/json" \
+  -d '{ "type": null, "amount": 1000, "concept": "tipo null", "actorId": "admin-1" }'
+```
+
+Ambas deben devolver `400` con `{"error":"validation_error","message":"movement type is
+required"}`. Un `type` inexistente en el enum (ej. `"FOO"`) debe seguir devolviendo
+`400` con el mensaje de `IllegalArgumentException` (ese caso ya funcionaba antes).
+
+## 2. Consolidación mensual sigue devolviendo los mismos valores
+
+```bash
+curl -s "http://localhost:8080/api/tenants/travesia-natural/cash/consolidation?period=2026-09"
+```
+
+Debe seguir devolviendo `200 OK` con los mismos campos y valores que antes del cambio
+(`ingresos`, `pagosOperacionales`, `gastos`, `devoluciones`, `total`, `cancelaciones`,
+`costosOperacionales`) — la única diferencia es una consulta menos a `reservations` por
+petición.
+
+## 3. Compilación y tests
+
+```bash
+./mvnw test
+```
+
+Deben seguir en verde `contextLoads` y los tests existentes, sin regresiones.
