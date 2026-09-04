@@ -1714,3 +1714,101 @@ Se espera `404 Not Found` con `{"error":"not_found", ...}` (`CashRegisterNotFoun
 ```
 
 Deben seguir en verde `contextLoads` y los tests existentes, sin regresiones.
+
+# Plan de verificación — Corrección de persistencia (agregados con hijos)
+
+Hallazgo de `/code-review` sobre spec 013: `CashRegisterRepositoryAdapter.save()`
+reconstruía el agregado completo (todos los movimientos/correcciones como entidades
+nuevas sin id) en cada guardado; como `orphanRemoval = true` no puede emparejarlas con
+las filas ya persistidas, cada guardado borraba y reinsertaba todo el historial. El
+mismo patrón existía en `ReservationRepositoryAdapter` desde spec 001 (reescribía
+`reservedServices` en cada pago/cancelación aunque nunca cambian tras la creación).
+Corregido en `cash` y `reservations`: se carga la entidad existente por id y solo se
+actualizan los campos escalares / se insertan los hijos nuevos, sin tocar los hijos ya
+persistidos. Se agregó `@OrderBy("id ASC")` a las colecciones `@OneToMany` de ambos
+módulos para que el orden de lectura sea determinista (necesario para poder distinguir
+"hijos ya persistidos" de "hijos nuevos" por posición en la lista).
+
+`operations` (`OperationCostRepositoryAdapter`, `ExecutionRepositoryAdapter`) se evaluó
+para uniformidad pero se dejó como inserción directa: `OperationCost` y `Execution` son
+entidades planas sin colecciones hijas y sin caso de uso de edición (se crean una sola
+vez), así que el mismo patrón de "cargar antes de escribir" ahí solo agrega un `SELECT`
+que siempre falla, sin corregir ningún bug real. Verificado además que el Frontend
+(repo `Multitour-Monolito-Portal`) hoy solo consume `reservations` — no tiene ninguna
+pantalla que toque `cash` ni `operations` — por lo que no hay necesidad funcional de
+tocar ese módulo ahora.
+
+## 1. Caja: movimientos incrementales no se pierden ni se duplican
+
+```bash
+CASH_ID=$(curl -s -X POST http://localhost:8080/api/tenants/travesia-natural/cash \
+  -H "Content-Type: application/json" \
+  -d '{ "businessDate": "2026-09-07", "baseAmount": 10000, "actorId": "admin-1" }' \
+  | grep -o '"cashRegisterId":"[^"]*"' | cut -d'"' -f4)
+
+curl -s -X POST http://localhost:8080/api/tenants/travesia-natural/cash/${CASH_ID}/movements \
+  -H "Content-Type: application/json" \
+  -d '{ "type": "INGRESO", "amount": 1000, "concept": "m1", "actorId": "admin-1" }'
+
+curl -s -X POST http://localhost:8080/api/tenants/travesia-natural/cash/${CASH_ID}/movements \
+  -H "Content-Type: application/json" \
+  -d '{ "type": "PAGO", "amount": 200, "concept": "m2", "actorId": "admin-1" }'
+
+curl -s "http://localhost:8080/api/tenants/travesia-natural/cash?businessDate=2026-09-07"
+```
+
+Cada respuesta debe traer los movimientos anteriores intactos (mismo `recordedAt`, sin
+duplicarse) más el nuevo agregado al final. La consulta final debe traer los 2
+movimientos, en el mismo orden en que se registraron.
+
+## 2. Caja: cerrar y corregir no tocan los movimientos ya guardados
+
+```bash
+curl -i -X POST http://localhost:8080/api/tenants/travesia-natural/cash/${CASH_ID}/close \
+  -H "Content-Type: application/json" -d '{ "actorId": "admin-1" }'
+
+curl -i -X POST http://localhost:8080/api/tenants/travesia-natural/cash/${CASH_ID}/corrections \
+  -H "Content-Type: application/json" \
+  -d '{ "justification": "ajuste", "actorId": "admin-1" }'
+```
+
+Ambas respuestas deben seguir trayendo los 2 movimientos originales sin cambios, más
+(en el segundo caso) la corrección agregada.
+
+## 3. Reserva: pagos y cancelación no afectan `reservedServices`
+
+Sobre una reserva `Pendiente de pago` con un solo servicio reservado:
+
+```bash
+curl -s -X POST http://localhost:8080/api/tenants/travesia-natural/reservations/${RES_ID}/payments \
+  -H "Content-Type: application/json" \
+  -d '{ "amount": 100000, "method": "ABONO", "actorId": "admin-1" }'
+
+curl -s -X POST http://localhost:8080/api/tenants/travesia-natural/reservations/${RES_ID}/cancel \
+  -H "Content-Type: application/json" \
+  -d '{ "reason": "prueba", "actorId": "admin-1" }'
+
+curl -s http://localhost:8080/api/tenants/travesia-natural/reservations/${RES_ID}
+```
+
+`reservedServices` debe seguir con el mismo único elemento en las tres respuestas
+(mismo `serviceReference`/`partySize`/`scheduledDate`), mientras `pendingBalance`,
+`paymentStatus`, `reservationStatus`, `cancelledAt`, etc. sí reflejan cada cambio.
+
+## 4. Histórico e informes siguen leyendo correctamente
+
+```bash
+curl -s http://localhost:8080/api/tenants/travesia-natural/cash/history
+curl -s "http://localhost:8080/api/tenants/travesia-natural/cash/consolidation?period=2026-09"
+```
+
+Ambos deben seguir devolviendo `200 OK` con los datos agregados de todas las cajas
+cerradas del tenant, movimientos en orden, sin errores de mapeo.
+
+## 5. Compilación y tests (spec 001 a spec 013, tras la corrección de persistencia)
+
+```bash
+./mvnw test
+```
+
+Deben seguir en verde `contextLoads` y los tests existentes, sin regresiones.

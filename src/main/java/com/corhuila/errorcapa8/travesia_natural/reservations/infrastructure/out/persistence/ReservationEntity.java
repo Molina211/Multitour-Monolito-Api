@@ -5,6 +5,7 @@ import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.Id;
 import jakarta.persistence.OneToMany;
+import jakarta.persistence.OrderBy;
 import jakarta.persistence.Table;
 
 import java.math.BigDecimal;
@@ -82,6 +83,7 @@ public class ReservationEntity {
     private Instant refundedAt;
 
     @OneToMany(mappedBy = "reservation", cascade = CascadeType.ALL, orphanRemoval = true)
+    @OrderBy("id ASC")
     private List<ReservedServiceEntity> reservedServices = new ArrayList<>();
 
     protected ReservationEntity() {
@@ -106,6 +108,36 @@ public class ReservationEntity {
         this.paymentStatus = paymentStatus;
         this.paymentMethod = paymentMethod;
         this.createdAt = createdAt;
+        this.pendingTransferAmount = pendingTransferAmount;
+        this.transferSupportReference = transferSupportReference;
+        this.cancellationReason = cancellationReason;
+        this.cancelledBy = cancelledBy;
+        this.cancelledAt = cancelledAt;
+        this.refundedAmount = refundedAmount;
+        this.refundReason = refundReason;
+        this.refundedBy = refundedBy;
+        this.refundMethod = refundMethod;
+        this.refundedAt = refundedAt;
+    }
+
+    /**
+     * Actualiza los campos que cambian durante el ciclo de vida de una reserva ya
+     * persistida (pagar, cancelar, devolver). {@code reservationId}/{@code tenantId}/
+     * {@code customerId}/{@code projectedValue}/{@code createdAt}/{@code reservedServices}
+     * son fijos desde la creación, no se tocan aquí.
+     */
+    public void updateState(BigDecimal finalValue, BigDecimal pendingBalance, BigDecimal creditBalance,
+                             String reservationStatus, String paymentStatus, String paymentMethod,
+                             BigDecimal pendingTransferAmount, String transferSupportReference,
+                             String cancellationReason, String cancelledBy, Instant cancelledAt,
+                             BigDecimal refundedAmount, String refundReason, String refundedBy,
+                             String refundMethod, Instant refundedAt) {
+        this.finalValue = finalValue;
+        this.pendingBalance = pendingBalance;
+        this.creditBalance = creditBalance;
+        this.reservationStatus = reservationStatus;
+        this.paymentStatus = paymentStatus;
+        this.paymentMethod = paymentMethod;
         this.pendingTransferAmount = pendingTransferAmount;
         this.transferSupportReference = transferSupportReference;
         this.cancellationReason = cancellationReason;
