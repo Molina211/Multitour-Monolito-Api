@@ -1,6 +1,6 @@
 # 010 — Ejecución de reservas y costos operacionales
 
-**Estado:** APROBADA
+**Estado:** TERMINADA
 **Fecha:** 2026-09-03
 **Repos afectados:** backend (rama `hu-back-001-dev`)
 **HU relacionada:** ninguna HU formal en el backlog cubre esto punto por punto; se basa
@@ -71,35 +71,35 @@ ya iniciada), pero no hay backend real detrás.
 
 ## Criterios de aceptación
 
-- [ ] Registrar la ejecución de una reserva `CONFIRMADA` marcando el servicio como
+- [x] Registrar la ejecución de una reserva `CONFIRMADA` marcando el servicio como
       prestado devuelve `200`, deja `reservationStatus = EN_EJECUCION`, y guarda
       `executed`/`served`/actor/fecha.
-- [ ] Registrar la ejecución marcando el servicio como no prestado exige una causal: sin
+- [x] Registrar la ejecución marcando el servicio como no prestado exige una causal: sin
       causal devuelve `400`; con causal devuelve `200` y `reservationStatus =
       EN_EJECUCION` igual que si se hubiera prestado.
-- [ ] Registrar una ejecución sobre una reserva que no está `CONFIRMADA` (por ejemplo
+- [x] Registrar una ejecución sobre una reserva que no está `CONFIRMADA` (por ejemplo
       `PENDIENTE_DE_PAGO`) no la modifica y devuelve un código de error (400 o 409,
       exacto a definir en el plan).
-- [ ] Registrar una segunda ejecución sobre una reserva que ya tiene una ejecución
+- [x] Registrar una segunda ejecución sobre una reserva que ya tiene una ejecución
       registrada devuelve `409`.
-- [ ] Consultar la ejecución registrada de una reserva devuelve los datos guardados
+- [x] Consultar la ejecución registrada de una reserva devuelve los datos guardados
       (prestado/no, cantidad ejecutada, causal, actor, fecha).
-- [ ] Consultar las reservas pendientes de ejecución de un tenant devuelve solo
+- [x] Consultar las reservas pendientes de ejecución de un tenant devuelve solo
       reservas `CONFIRMADA` sin ejecución registrada, y solo las de ese tenant.
-- [ ] Registrar un costo operacional sobre una reserva sin ejecución registrada no
+- [x] Registrar un costo operacional sobre una reserva sin ejecución registrada no
       queda guardado y devuelve un código de error (400 o 409, exacto a definir en el
       plan).
-- [ ] Registrar un costo operacional con concepto vacío o monto menor o igual a cero
+- [x] Registrar un costo operacional con concepto vacío o monto menor o igual a cero
       devuelve `400`.
-- [ ] Registrar un costo operacional válido sobre una reserva con ejecución ya iniciada
+- [x] Registrar un costo operacional válido sobre una reserva con ejecución ya iniciada
       devuelve éxito (200 o 201, a definir en el plan) y queda consultable después.
-- [ ] Registrar un segundo costo operacional sobre la misma reserva se acumula junto al
+- [x] Registrar un segundo costo operacional sobre la misma reserva se acumula junto al
       primero, sin reemplazarlo.
-- [ ] Consultar los costos operacionales de una reserva devuelve todos los registrados,
+- [x] Consultar los costos operacionales de una reserva devuelve todos los registrados,
       en orden cronológico.
-- [ ] Cualquier operación sobre un `tenantId` inexistente devuelve `404`; sobre uno
+- [x] Cualquier operación sobre un `tenantId` inexistente devuelve `404`; sobre uno
       `Inactivo`, `409`.
-- [ ] El proyecto compila y los tests existentes (specs 001-009) siguen pasando.
+- [x] El proyecto compila y los tests existentes (specs 001-009) siguen pasando.
 
 ## Impacto en multitenencia
 

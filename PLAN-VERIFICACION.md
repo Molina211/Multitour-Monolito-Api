@@ -1275,3 +1275,22 @@ sección).
 ```
 
 Deben seguir en verde `contextLoads` y los tests existentes, sin regresiones.
+
+## Hallazgos de esta verificación
+
+La ejecución manual de los pasos 1-11 encontró tres fallos reales, corregidos antes de
+cerrar la spec:
+
+1. `RegisterExecutionService` validaba `Execution.create(...)` (que puede lanzar
+   `IllegalArgumentException`) *después* de guardar la transición de la reserva a
+   `EN_EJECUCION`. Una ejecución no prestada sin causal (paso 2) devolvía `400` pero
+   dejaba la reserva corrompida en `EN_EJECUCION`. Se reordenó: validar primero,
+   mutar/guardar después.
+2. La migración `V8` declaró `executed INTEGER NOT NULL`, pero el dominio fija
+   `executed = null` cuando `served = false`. Causaba `500` al registrar una ejecución
+   no prestada. Se agregó `V9__make_execution_executed_nullable.sql` (no se edita `V8`
+   ya aplicada).
+3. El guardado de `Reservation` y de `Execution` no estaba en una única transacción: si
+   el segundo guardado fallaba (como en el bug 2), la reserva quedaba en
+   `EN_EJECUCION` sin ejecución asociada, sin forma de reintentar. Se agregó
+   `@Transactional` a `RegisterExecutionService.registerExecution()`.

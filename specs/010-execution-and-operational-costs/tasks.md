@@ -35,7 +35,7 @@
       reservas y costos operacionales": un `curl` por cada criterio de aceptación ·
       repo: backend · depende de T06 · ~20 min
 
-- [ ] T08 — Verificación final: `./mvnw test` en verde y ejecución manual de
+- [x] T08 — Verificación final: `./mvnw test` en verde y ejecución manual de
       `PLAN-VERIFICACION.md` sección 010 contra el servidor local; marcar los
       criterios de aceptación de `spec.md` como cumplidos · repo: backend · depende de
       T07 · requiere permiso explícito para build/tests/servidor (regla 5 de

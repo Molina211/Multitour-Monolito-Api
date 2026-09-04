@@ -13,6 +13,7 @@ import com.corhuila.errorcapa8.travesia_natural.tenants.domain.model.Tenant;
 import com.corhuila.errorcapa8.travesia_natural.tenants.domain.model.TenantStatus;
 import com.corhuila.errorcapa8.travesia_natural.tenants.domain.port.out.TenantRepositoryPort;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 @Service
 public class RegisterExecutionService implements RegisterExecutionUseCase {
@@ -30,6 +31,7 @@ public class RegisterExecutionService implements RegisterExecutionUseCase {
     }
 
     @Override
+    @Transactional
     public Execution registerExecution(RegisterExecutionCommand command) {
         requireActiveTenant(command.tenantId());
 
@@ -37,11 +39,11 @@ public class RegisterExecutionService implements RegisterExecutionUseCase {
                 .findByTenantIdAndReservationId(command.tenantId(), command.reservationId())
                 .orElseThrow(() -> new ReservationNotFoundException(command.reservationId().toString()));
 
-        Reservation executingReservation = reservation.startExecution();
-        reservationRepositoryPort.save(executingReservation);
-
         Execution execution = Execution.create(command.tenantId(), command.reservationId(), command.served(),
                 command.executed(), command.causal(), command.actorId());
+
+        Reservation executingReservation = reservation.startExecution();
+        reservationRepositoryPort.save(executingReservation);
 
         return executionRepositoryPort.save(execution);
     }
