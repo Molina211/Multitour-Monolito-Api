@@ -36,7 +36,10 @@ public class ReservationRepositoryAdapter implements ReservationRepositoryPort {
                 reservation.paymentMethod(),
                 reservation.createdAt(),
                 reservation.pendingTransferAmount(),
-                reservation.transferSupportReference());
+                reservation.transferSupportReference(),
+                reservation.cancellationReason(),
+                reservation.cancelledBy(),
+                reservation.cancelledAt());
 
         for (ReservedService reservedService : reservation.reservedServices()) {
             entity.addReservedService(new ReservedServiceEntity(
@@ -85,6 +88,9 @@ public class ReservationRepositoryAdapter implements ReservationRepositoryPort {
                 entity.getPaymentMethod(),
                 entity.getCreatedAt(),
                 entity.getPendingTransferAmount(),
-                entity.getTransferSupportReference());
+                entity.getTransferSupportReference(),
+                entity.getCancellationReason(),
+                entity.getCancelledBy(),
+                entity.getCancelledAt());
     }
 }

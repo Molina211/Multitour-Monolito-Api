@@ -2,14 +2,18 @@ package com.corhuila.errorcapa8.travesia_natural.reservations.infrastructure.in.
 
 import com.corhuila.errorcapa8.travesia_natural.common.security.JwtPrincipal;
 import com.corhuila.errorcapa8.travesia_natural.reservations.domain.exception.InvalidReservationException;
+import com.corhuila.errorcapa8.travesia_natural.reservations.domain.exception.ReservationNotCancellableException;
 import com.corhuila.errorcapa8.travesia_natural.reservations.domain.exception.ReservationNotFoundException;
 import com.corhuila.errorcapa8.travesia_natural.reservations.domain.exception.TenantMismatchException;
 import com.corhuila.errorcapa8.travesia_natural.reservations.domain.model.Reservation;
 import com.corhuila.errorcapa8.travesia_natural.reservations.domain.model.ReservedService;
+import com.corhuila.errorcapa8.travesia_natural.reservations.domain.port.in.CancelReservationCommand;
+import com.corhuila.errorcapa8.travesia_natural.reservations.domain.port.in.CancelReservationUseCase;
 import com.corhuila.errorcapa8.travesia_natural.reservations.domain.port.in.CreateReservationCommand;
 import com.corhuila.errorcapa8.travesia_natural.reservations.domain.port.in.CreateReservationUseCase;
 import com.corhuila.errorcapa8.travesia_natural.reservations.domain.port.in.ReservationQueryUseCase;
 import com.corhuila.errorcapa8.travesia_natural.common.web.dto.ErrorResponse;
+import com.corhuila.errorcapa8.travesia_natural.reservations.infrastructure.in.web.dto.CancelReservationRequest;
 import com.corhuila.errorcapa8.travesia_natural.reservations.infrastructure.in.web.dto.CreateReservationRequest;
 import com.corhuila.errorcapa8.travesia_natural.reservations.infrastructure.in.web.dto.ReservationResponse;
 import com.corhuila.errorcapa8.travesia_natural.reservations.infrastructure.in.web.dto.ReservedServiceRequest;
@@ -57,11 +61,14 @@ public class ReservationController {
 
     private final CreateReservationUseCase createReservationUseCase;
     private final ReservationQueryUseCase reservationQueryUseCase;
+    private final CancelReservationUseCase cancelReservationUseCase;
 
     public ReservationController(CreateReservationUseCase createReservationUseCase,
-                                  ReservationQueryUseCase reservationQueryUseCase) {
+                                  ReservationQueryUseCase reservationQueryUseCase,
+                                  CancelReservationUseCase cancelReservationUseCase) {
         this.createReservationUseCase = createReservationUseCase;
         this.reservationQueryUseCase = reservationQueryUseCase;
+        this.cancelReservationUseCase = cancelReservationUseCase;
     }
 
     @PostMapping
@@ -98,6 +105,18 @@ public class ReservationController {
         return ResponseEntity.ok(ReservationResponse.from(reservationQueryUseCase.getById(tenantId, reservationId)));
     }
 
+    @PostMapping("/{reservationId}/cancel")
+    public ResponseEntity<ReservationResponse> cancel(@PathVariable String tenantId,
+                                                         @PathVariable UUID reservationId,
+                                                         @RequestBody CancelReservationRequest request) {
+        CancelReservationCommand command = new CancelReservationCommand(
+                tenantId, reservationId, request.reason(), request.actorId());
+
+        Reservation reservation = cancelReservationUseCase.cancelReservation(command);
+
+        return ResponseEntity.ok(ReservationResponse.from(reservation));
+    }
+
     private List<ReservedService> toDomainReservedServices(List<ReservedServiceRequest> requests) {
         if (requests == null) {
             return List.of();
@@ -125,5 +144,11 @@ public class ReservationController {
     @ExceptionHandler(TenantMismatchException.class)
     public ResponseEntity<ErrorResponse> handleTenantMismatch(TenantMismatchException ex) {
         return ResponseEntity.status(HttpStatus.FORBIDDEN).body(new ErrorResponse("tenant_mismatch", ex.getMessage()));
+    }
+
+    @ExceptionHandler(ReservationNotCancellableException.class)
+    public ResponseEntity<ErrorResponse> handleReservationNotCancellable(ReservationNotCancellableException ex) {
+        return ResponseEntity.status(HttpStatus.CONFLICT)
+                .body(new ErrorResponse("reservation_not_cancellable", ex.getMessage()));
     }
 }

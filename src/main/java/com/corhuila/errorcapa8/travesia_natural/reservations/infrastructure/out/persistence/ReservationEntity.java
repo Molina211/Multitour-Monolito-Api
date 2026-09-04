@@ -57,6 +57,15 @@ public class ReservationEntity {
     @Column(name = "transfer_support_reference")
     private String transferSupportReference;
 
+    @Column(name = "cancellation_reason")
+    private String cancellationReason;
+
+    @Column(name = "cancelled_by")
+    private String cancelledBy;
+
+    @Column(name = "cancelled_at")
+    private Instant cancelledAt;
+
     @OneToMany(mappedBy = "reservation", cascade = CascadeType.ALL, orphanRemoval = true)
     private List<ReservedServiceEntity> reservedServices = new ArrayList<>();
 
@@ -67,7 +76,8 @@ public class ReservationEntity {
     public ReservationEntity(UUID reservationId, String tenantId, String customerId, BigDecimal projectedValue,
                               BigDecimal finalValue, BigDecimal pendingBalance, BigDecimal creditBalance,
                               String reservationStatus, String paymentStatus, String paymentMethod,
-                              Instant createdAt, BigDecimal pendingTransferAmount, String transferSupportReference) {
+                              Instant createdAt, BigDecimal pendingTransferAmount, String transferSupportReference,
+                              String cancellationReason, String cancelledBy, Instant cancelledAt) {
         this.reservationId = reservationId;
         this.tenantId = tenantId;
         this.customerId = customerId;
@@ -81,6 +91,9 @@ public class ReservationEntity {
         this.createdAt = createdAt;
         this.pendingTransferAmount = pendingTransferAmount;
         this.transferSupportReference = transferSupportReference;
+        this.cancellationReason = cancellationReason;
+        this.cancelledBy = cancelledBy;
+        this.cancelledAt = cancelledAt;
     }
 
     public void addReservedService(ReservedServiceEntity reservedService) {
@@ -138,6 +151,18 @@ public class ReservationEntity {
 
     public String getTransferSupportReference() {
         return transferSupportReference;
+    }
+
+    public String getCancellationReason() {
+        return cancellationReason;
+    }
+
+    public String getCancelledBy() {
+        return cancelledBy;
+    }
+
+    public Instant getCancelledAt() {
+        return cancelledAt;
     }
 
     public List<ReservedServiceEntity> getReservedServices() {

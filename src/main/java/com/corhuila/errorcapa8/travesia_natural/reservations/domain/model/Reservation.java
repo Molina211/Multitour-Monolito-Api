@@ -2,6 +2,7 @@ package com.corhuila.errorcapa8.travesia_natural.reservations.domain.model;
 
 import com.corhuila.errorcapa8.travesia_natural.reservations.domain.exception.InvalidReservationException;
 import com.corhuila.errorcapa8.travesia_natural.reservations.domain.exception.PaymentAlreadyResolvedException;
+import com.corhuila.errorcapa8.travesia_natural.reservations.domain.exception.ReservationNotCancellableException;
 import com.corhuila.errorcapa8.travesia_natural.reservations.domain.exception.ReservationNotExecutableException;
 
 import java.math.BigDecimal;
@@ -30,13 +31,17 @@ public final class Reservation {
     private final Instant createdAt;
     private final BigDecimal pendingTransferAmount;
     private final String transferSupportReference;
+    private final String cancellationReason;
+    private final String cancelledBy;
+    private final Instant cancelledAt;
 
     private Reservation(UUID reservationId, String tenantId, String customerId,
                          List<ReservedService> reservedServices, BigDecimal projectedValue,
                          BigDecimal finalValue, BigDecimal pendingBalance, BigDecimal creditBalance,
                          ReservationStatus reservationStatus, PaymentStatus paymentStatus,
                          String paymentMethod, Instant createdAt, BigDecimal pendingTransferAmount,
-                         String transferSupportReference) {
+                         String transferSupportReference, String cancellationReason, String cancelledBy,
+                         Instant cancelledAt) {
         this.reservationId = reservationId;
         this.tenantId = tenantId;
         this.customerId = customerId;
@@ -51,6 +56,9 @@ public final class Reservation {
         this.createdAt = createdAt;
         this.pendingTransferAmount = pendingTransferAmount;
         this.transferSupportReference = transferSupportReference;
+        this.cancellationReason = cancellationReason;
+        this.cancelledBy = cancelledBy;
+        this.cancelledAt = cancelledAt;
     }
 
     /**
@@ -87,6 +95,9 @@ public final class Reservation {
                 null,
                 Instant.now(),
                 null,
+                null,
+                null,
+                null,
                 null);
     }
 
@@ -99,10 +110,11 @@ public final class Reservation {
                                             BigDecimal finalValue, BigDecimal pendingBalance,
                                             BigDecimal creditBalance, ReservationStatus reservationStatus,
                                             PaymentStatus paymentStatus, String paymentMethod, Instant createdAt,
-                                            BigDecimal pendingTransferAmount, String transferSupportReference) {
+                                            BigDecimal pendingTransferAmount, String transferSupportReference,
+                                            String cancellationReason, String cancelledBy, Instant cancelledAt) {
         return new Reservation(reservationId, tenantId, customerId, reservedServices, projectedValue, finalValue,
                 pendingBalance, creditBalance, reservationStatus, paymentStatus, paymentMethod, createdAt,
-                pendingTransferAmount, transferSupportReference);
+                pendingTransferAmount, transferSupportReference, cancellationReason, cancelledBy, cancelledAt);
     }
 
     /**
@@ -118,7 +130,7 @@ public final class Reservation {
         }
         return new Reservation(reservationId, tenantId, customerId, reservedServices, projectedValue, finalValue,
                 BigDecimal.ZERO, creditBalance, ReservationStatus.CONFIRMADA, PaymentStatus.PAGADO, "Efectivo",
-                createdAt, null, null);
+                createdAt, null, null, null, null, null);
     }
 
     /**
@@ -136,7 +148,7 @@ public final class Reservation {
                 newPendingBalance, creditBalance,
                 settled ? ReservationStatus.CONFIRMADA : reservationStatus,
                 settled ? PaymentStatus.PAGADO : PaymentStatus.PARCIAL,
-                "Abono", createdAt, null, null);
+                "Abono", createdAt, null, null, null, null, null);
     }
 
     /**
@@ -154,7 +166,7 @@ public final class Reservation {
         }
         return new Reservation(reservationId, tenantId, customerId, reservedServices, projectedValue, finalValue,
                 pendingBalance, creditBalance, reservationStatus, PaymentStatus.EN_VALIDACION, "Transferencia",
-                createdAt, amount, supportReference);
+                createdAt, amount, supportReference, null, null, null);
     }
 
     /**
@@ -168,7 +180,7 @@ public final class Reservation {
         }
         return new Reservation(reservationId, tenantId, customerId, reservedServices, projectedValue, finalValue,
                 pendingBalance, creditBalance, reservationStatus, paymentStatus, paymentMethod, createdAt,
-                pendingTransferAmount, transferSupportReference)
+                pendingTransferAmount, transferSupportReference, null, null, null)
                 .registerInstallmentPayment(pendingTransferAmount);
     }
 
@@ -183,7 +195,7 @@ public final class Reservation {
         }
         return new Reservation(reservationId, tenantId, customerId, reservedServices, projectedValue, finalValue,
                 pendingBalance, creditBalance, reservationStatus, PaymentStatus.RECHAZADO, paymentMethod,
-                createdAt, null, null);
+                createdAt, null, null, null, null, null);
     }
 
     /**
@@ -200,7 +212,38 @@ public final class Reservation {
         }
         return new Reservation(reservationId, tenantId, customerId, reservedServices, projectedValue, finalValue,
                 pendingBalance, creditBalance, ReservationStatus.EN_EJECUCION, paymentStatus, paymentMethod,
-                createdAt, pendingTransferAmount, transferSupportReference);
+                createdAt, pendingTransferAmount, transferSupportReference, null, null, null);
+    }
+
+    /**
+     * Cancela la reserva antes de que inicie ejecución (spec 011): solo permitido desde
+     * `PendienteDePago` o `Confirmada`, y solo si no hay una transferencia en espera de
+     * aprobación/rechazo (esa decisión debe resolverse primero, spec 009). Si ya se
+     * había recibido dinero (`finalValue - pendingBalance > 0`), ese monto queda como
+     * saldo a favor pendiente de devolución (spec futura 012); si no hubo ningún pago,
+     * no se genera saldo a favor.
+     */
+    public Reservation cancel(String reason, String actorId) {
+        if (reason == null || reason.isBlank()) {
+            throw new InvalidReservationException("cancellation reason is required");
+        }
+        if (reservationStatus != ReservationStatus.PENDIENTE_DE_PAGO && reservationStatus != ReservationStatus.CONFIRMADA) {
+            throw new ReservationNotCancellableException(
+                    "reservation must be PendienteDePago or Confirmada to be cancelled, current status: "
+                            + reservationStatus.label() + " (reservation: " + reservationId + ")");
+        }
+        if (pendingTransferAmount != null) {
+            throw new ReservationNotCancellableException(
+                    "reservation has a transfer awaiting a support decision, resolve it before cancelling (reservation: "
+                            + reservationId + ")");
+        }
+        BigDecimal amountAlreadyPaid = finalValue.subtract(pendingBalance);
+        BigDecimal newCreditBalance = amountAlreadyPaid.signum() > 0 ? amountAlreadyPaid : creditBalance;
+        PaymentStatus newPaymentStatus =
+                amountAlreadyPaid.signum() > 0 ? PaymentStatus.SALDO_A_FAVOR_PENDIENTE : paymentStatus;
+        return new Reservation(reservationId, tenantId, customerId, reservedServices, projectedValue, finalValue,
+                pendingBalance, newCreditBalance, ReservationStatus.CANCELADA, newPaymentStatus, paymentMethod,
+                createdAt, pendingTransferAmount, transferSupportReference, reason, actorId, Instant.now());
     }
 
     private void validatePaymentAmount(BigDecimal amount) {
@@ -263,5 +306,17 @@ public final class Reservation {
 
     public String transferSupportReference() {
         return transferSupportReference;
+    }
+
+    public String cancellationReason() {
+        return cancellationReason;
+    }
+
+    public String cancelledBy() {
+        return cancelledBy;
+    }
+
+    public Instant cancelledAt() {
+        return cancelledAt;
     }
 }
