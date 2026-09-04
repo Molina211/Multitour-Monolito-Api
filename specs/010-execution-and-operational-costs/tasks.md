@@ -31,7 +31,7 @@
 
   *(fin lote 3: T05-T06)*
 
-- [ ] T07 — Actualizar `PLAN-VERIFICACION.md` con la sección "010 — Ejecución de
+- [x] T07 — Actualizar `PLAN-VERIFICACION.md` con la sección "010 — Ejecución de
       reservas y costos operacionales": un `curl` por cada criterio de aceptación ·
       repo: backend · depende de T06 · ~20 min
 

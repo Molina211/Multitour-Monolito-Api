@@ -1095,3 +1095,183 @@ Se espera `404 Not Found`. Luego, desactivar `travesia-natural` (paso 5 de la se
 ```
 
 Deben seguir en verde `contextLoads` y los tests existentes, sin regresiones.
+
+# Plan de verificación — 010 Ejecución de reservas y costos operacionales
+
+Corresponde a `specs/010-execution-and-operational-costs/`. Requiere Postgres arriba, la
+app corriendo, el tenant `travesia-natural` `Activo`, y un token válido de
+`laura.gomez@example.com` (sección "007", pasos 1-2) para crear reservas nuevas. Cada
+reserva usada se paga primero en efectivo (igual que sección "009", paso 1) para
+llevarla a `Confirmada`, único estado desde el que se puede iniciar ejecución.
+
+```bash
+TOKEN="<accessToken de la sección 007, paso 1>"
+```
+
+## 1. Registrar ejecución prestada sobre una reserva `Confirmada` (`200`)
+
+Crear una reserva y pagarla en efectivo (igual que sección "009", paso 1) para obtener
+`RES_G` en estado `Confirmada`:
+
+```bash
+curl -s -X POST http://localhost:8080/api/tenants/travesia-natural/reservations \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer ${TOKEN}" \
+  -d '{ "projectedValue": 300000, "reservedServices": [{ "serviceReference": "tour-laguna-verde" }] }'
+```
+
+Guardar el `reservationId` como `RES_G`, pagarla:
+
+```bash
+curl -i -X POST http://localhost:8080/api/tenants/travesia-natural/reservations/${RES_G}/payments \
+  -H "Content-Type: application/json" \
+  -d '{ "method": "EFECTIVO", "amount": 300000 }'
+```
+
+Y registrar la ejecución:
+
+```bash
+curl -i -X POST http://localhost:8080/api/tenants/travesia-natural/reservations/${RES_G}/execution \
+  -H "Content-Type: application/json" \
+  -d '{ "served": true, "executed": 4, "actorId": "guia-1" }'
+```
+
+Se espera `200 OK` con `served: true`, `executed: 4`, `causal: null`. Confirmar con
+`curl -s http://localhost:8080/api/tenants/travesia-natural/reservations/${RES_G}` que
+`reservationStatus` pasó a `"En ejecucion"`.
+
+## 2. Ejecución no prestada: sin causal `400`, con causal `200`
+
+Crear y pagar `RES_H` igual que en el paso 1. Luego, sin `causal`:
+
+```bash
+curl -i -X POST http://localhost:8080/api/tenants/travesia-natural/reservations/${RES_H}/execution \
+  -H "Content-Type: application/json" \
+  -d '{ "served": false, "actorId": "guia-1" }'
+```
+
+Se espera `400 Bad Request` con `{"error":"validation_error", ...}`. Ahora con
+`causal`:
+
+```bash
+curl -i -X POST http://localhost:8080/api/tenants/travesia-natural/reservations/${RES_H}/execution \
+  -H "Content-Type: application/json" \
+  -d '{ "served": false, "causal": "Cliente no se presento", "actorId": "guia-1" }'
+```
+
+Se espera `200 OK` con `served: false`, `executed: null`,
+`causal: "Cliente no se presento"`, y `reservationStatus: "En ejecucion"` (misma
+transición que si se hubiera prestado).
+
+## 3. Ejecución sobre una reserva no `Confirmada` (`409`)
+
+Crear `RES_I` sin pagarla (queda `Pendiente de pago`):
+
+```bash
+curl -i -X POST http://localhost:8080/api/tenants/travesia-natural/reservations/${RES_I}/execution \
+  -H "Content-Type: application/json" \
+  -d '{ "served": true, "executed": 2, "actorId": "guia-1" }'
+```
+
+Se espera `409 Conflict` con `{"error":"reservation_not_executable", ...}`, y la reserva
+sigue `Pendiente de pago` sin cambios.
+
+## 4. Segunda ejecución sobre una reserva ya ejecutada (`409`)
+
+Repetir sobre `RES_G` (ya ejecutada en el paso 1) el mismo `curl` del paso 1: se espera
+`409 Conflict` con `{"error":"reservation_not_executable", ...}`.
+
+## 5. Consultar la ejecución registrada de una reserva (`200`)
+
+```bash
+curl -s http://localhost:8080/api/tenants/travesia-natural/reservations/${RES_G}/execution
+```
+
+Se espera `200 OK` con los mismos datos guardados en el paso 1
+(`served`, `executed`, `causal`, `actorId`, `recordedAt`).
+
+## 6. Listado de reservas pendientes de ejecución (`200`, aislado por tenant)
+
+Crear y pagar `RES_J` igual que en el paso 1, pero sin ejecutarla. Luego:
+
+```bash
+curl -s http://localhost:8080/api/tenants/travesia-natural/reservations/pending-execution
+```
+
+Se espera `200 OK` con exactamente `RES_J` en la lista: `RES_G` y `RES_H` ya pasaron a
+`En ejecucion` (pasos 1-2) y `RES_I` sigue `Pendiente de pago` (paso 3), ninguna de las
+dos aplica. Confirmar aislamiento con un segundo tenant `Activo` (por ejemplo el creado
+en la sección "002"): su `GET .../pending-execution` no debe incluir `RES_J`.
+
+## 7. Costo operacional sin ejecución iniciada (`409`)
+
+Sobre `RES_J` (`Confirmada`, sin ejecución todavía):
+
+```bash
+curl -i -X POST http://localhost:8080/api/tenants/travesia-natural/reservations/${RES_J}/costs \
+  -H "Content-Type: application/json" \
+  -d '{ "concept": "Combustible", "amount": 50000, "actorId": "guia-1" }'
+```
+
+Se espera `409 Conflict` con `{"error":"execution_not_started", ...}`.
+
+## 8. Costo operacional con concepto/monto inválido (`400`)
+
+Sobre `RES_G` (ya en `En ejecucion` desde el paso 1):
+
+```bash
+curl -i -X POST http://localhost:8080/api/tenants/travesia-natural/reservations/${RES_G}/costs \
+  -H "Content-Type: application/json" \
+  -d '{ "concept": "", "amount": 50000, "actorId": "guia-1" }'
+```
+
+Se espera `400 Bad Request`. Repetir con `"amount": 0` y concepto no vacío: también
+`400 Bad Request`.
+
+## 9. Costo operacional válido y segundo costo acumulado (`201`)
+
+```bash
+curl -i -X POST http://localhost:8080/api/tenants/travesia-natural/reservations/${RES_G}/costs \
+  -H "Content-Type: application/json" \
+  -d '{ "concept": "Combustible", "amount": 50000, "actorId": "guia-1" }'
+```
+
+Se espera `201 Created`. Luego un segundo costo:
+
+```bash
+curl -i -X POST http://localhost:8080/api/tenants/travesia-natural/reservations/${RES_G}/costs \
+  -H "Content-Type: application/json" \
+  -d '{ "concept": "Almuerzo del grupo", "amount": 30000, "actorId": "guia-1" }'
+```
+
+Se espera `201 Created`, sin reemplazar el costo anterior.
+
+## 10. Listado de costos en orden cronológico (`200`)
+
+```bash
+curl -s http://localhost:8080/api/tenants/travesia-natural/reservations/${RES_G}/costs
+```
+
+Se espera `200 OK` con los dos costos del paso 9, en el orden en que se registraron
+(`Combustible` antes que `Almuerzo del grupo`).
+
+## 11. Tenant inexistente (`404`) y tenant `Inactivo` (`409`)
+
+```bash
+curl -i -X POST http://localhost:8080/api/tenants/no-existe/reservations/${RES_G}/execution \
+  -H "Content-Type: application/json" \
+  -d '{ "served": true, "executed": 1, "actorId": "guia-1" }'
+```
+
+Se espera `404 Not Found`. Luego, desactivar `travesia-natural` (paso 5 de la sección
+"002") y repetir cualquier operación de ejecución/costos: se espera `409 Conflict` con
+`{"error":"tenant_inactive", ...}`. Reactivar el tenant al terminar (paso 6 de esa
+sección).
+
+## 12. Compilación y tests (spec 001 a spec 010)
+
+```bash
+./mvnw test
+```
+
+Deben seguir en verde `contextLoads` y los tests existentes, sin regresiones.
