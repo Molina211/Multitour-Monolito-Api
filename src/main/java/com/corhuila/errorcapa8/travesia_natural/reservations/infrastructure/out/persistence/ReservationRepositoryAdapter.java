@@ -21,8 +21,49 @@ public class ReservationRepositoryAdapter implements ReservationRepositoryPort {
         this.jpaRepository = jpaRepository;
     }
 
+    /**
+     * {@code reservedServices} se fija una sola vez al crear la reserva y ningún método de
+     * dominio lo modifica después (pagar/cancelar/devolver solo cambian campos escalares):
+     * si la reserva ya existe, se actualizan esos campos y no se toca la colección de
+     * servicios (antes: se reconstruía el agregado completo en cada guardado, y
+     * `orphanRemoval` borraba y reinsertaba los servicios reservados en cada pago o
+     * cancelación, aunque no hubieran cambiado).
+     */
     @Override
+    @Transactional
     public Reservation save(Reservation reservation) {
+        ReservationEntity entity = jpaRepository.findById(reservation.reservationId())
+                .map(existing -> applyChanges(existing, reservation))
+                .orElseGet(() -> toNewEntity(reservation));
+
+        jpaRepository.save(entity);
+
+        return reservation;
+    }
+
+    private static ReservationEntity applyChanges(ReservationEntity entity, Reservation reservation) {
+        entity.updateState(
+                reservation.finalValue(),
+                reservation.pendingBalance(),
+                reservation.creditBalance(),
+                reservation.reservationStatus().label(),
+                reservation.paymentStatus().label(),
+                reservation.paymentMethod(),
+                reservation.pendingTransferAmount(),
+                reservation.transferSupportReference(),
+                reservation.cancellationReason(),
+                reservation.cancelledBy(),
+                reservation.cancelledAt(),
+                reservation.refundedAmount(),
+                reservation.refundReason(),
+                reservation.refundedBy(),
+                reservation.refundMethod(),
+                reservation.refundedAt());
+
+        return entity;
+    }
+
+    private static ReservationEntity toNewEntity(Reservation reservation) {
         ReservationEntity entity = new ReservationEntity(
                 reservation.reservationId(),
                 reservation.tenantId(),
@@ -54,9 +95,7 @@ public class ReservationRepositoryAdapter implements ReservationRepositoryPort {
                     reservedService.scheduledDate()));
         }
 
-        jpaRepository.save(entity);
-
-        return reservation;
+        return entity;
     }
 
     @Override

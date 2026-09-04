@@ -10,4 +10,11 @@ public interface OperationCostRepositoryPort {
     OperationCost save(OperationCost operationCost);
 
     List<OperationCost> findAllByTenantIdAndReservationIdOrderByRecordedAt(String tenantId, UUID reservationId);
+
+    /**
+     * Todos los costos operacionales de un tenant, sin filtrar por reserva — la
+     * consolidación mensual (RF-012, spec 013) filtra por {@code recordedAt} en la capa
+     * de aplicación, igual que {@code findAllByTenantId} en {@code reservations}.
+     */
+    List<OperationCost> findAllByTenantId(String tenantId);
 }

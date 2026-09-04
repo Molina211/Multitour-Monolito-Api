@@ -1550,3 +1550,327 @@ sección).
 ```
 
 Deben seguir en verde `contextLoads` y los tests existentes, sin regresiones.
+
+# Plan de verificación — 013 Caja diaria
+
+Todos los endpoints cuelgan de `/api/tenants/{tenantId}/cash`, usando `travesia-natural`
+(debe estar `Activo`). Guardar el `cashRegisterId` devuelto en `${CASH_ID}` para los
+pasos siguientes.
+
+## 1. Abrir caja del día (`201`)
+
+```bash
+curl -i -X POST http://localhost:8080/api/tenants/travesia-natural/cash \
+  -H "Content-Type: application/json" \
+  -d '{ "businessDate": "2026-09-04", "baseAmount": 50000, "actorId": "admin-1" }'
+```
+
+Se espera `201 Created` con `status: "ABIERTA"`, `baseAmount: 50000`, `movements: []`,
+`corrections: []`, `totalAmount: null`.
+
+## 2. Abrir una segunda caja para la misma fecha (`409`)
+
+```bash
+curl -i -X POST http://localhost:8080/api/tenants/travesia-natural/cash \
+  -H "Content-Type: application/json" \
+  -d '{ "businessDate": "2026-09-04", "baseAmount": 10000, "actorId": "admin-1" }'
+```
+
+Se espera `409 Conflict` con `{"error":"conflict", ...}` (`CashRegisterAlreadyOpenException`).
+
+## 3. Registrar movimientos `INGRESO`, `PAGO` y `GASTO` (`201`)
+
+```bash
+curl -i -X POST http://localhost:8080/api/tenants/travesia-natural/cash/${CASH_ID}/movements \
+  -H "Content-Type: application/json" \
+  -d '{ "type": "INGRESO", "amount": 100000, "concept": "Venta de tour", "actorId": "admin-1" }'
+
+curl -i -X POST http://localhost:8080/api/tenants/travesia-natural/cash/${CASH_ID}/movements \
+  -H "Content-Type: application/json" \
+  -d '{ "type": "PAGO", "amount": 20000, "concept": "Pago a guía", "actorId": "admin-1" }'
+
+curl -i -X POST http://localhost:8080/api/tenants/travesia-natural/cash/${CASH_ID}/movements \
+  -H "Content-Type: application/json" \
+  -d '{ "type": "GASTO", "amount": 5000, "concept": "Combustible", "actorId": "admin-1" }'
+```
+
+Cada uno responde `201 Created` con el movimiento añadido a la lista `movements` y
+`totalAmount` sigue `null` (caja `ABIERTA`, todavía sin congelar).
+
+## 4. Registrar un movimiento `DEVOLUCION` (`400`)
+
+Las devoluciones nunca se registran como movimiento manual: se calculan en vivo desde
+`reservations` (paso 5). `CashMovementType` deliberadamente no incluye `DEVOLUCION`:
+
+```bash
+curl -i -X POST http://localhost:8080/api/tenants/travesia-natural/cash/${CASH_ID}/movements \
+  -H "Content-Type: application/json" \
+  -d '{ "type": "DEVOLUCION", "amount": 1000, "concept": "Devolucion manual", "actorId": "admin-1" }'
+```
+
+Se espera `400 Bad Request` con `{"error":"validation_error", ...}`
+(`CashMovementType.valueOf("DEVOLUCION")` lanza `IllegalArgumentException`).
+
+## 5. Consultar la caja abierta con total en vivo (`200`)
+
+```bash
+curl -s "http://localhost:8080/api/tenants/travesia-natural/cash?businessDate=2026-09-04"
+```
+
+Se espera `200 OK` con `status: "ABIERTA"` y `totalAmount` calculado en vivo como
+`baseAmount + ingresos - pagos - gastos - devoluciones del día` (sin persistirse:
+`GET` sucesivos recalculan, no guardan). Las devoluciones se traen de reservas reales
+con `refundedAt` ese mismo `businessDate` (sección "012"): si hay reservas devueltas
+ese día, el total las descuenta aunque no exista ningún movimiento `DEVOLUCION`
+persistido — es la integración cruzada `cash` → `reservations` (`RefundsTotalCalculator`).
+
+## 6. Cerrar la caja (`200`, total congelado)
+
+```bash
+curl -i -X POST http://localhost:8080/api/tenants/travesia-natural/cash/${CASH_ID}/close \
+  -H "Content-Type: application/json" \
+  -d '{ "actorId": "admin-1" }'
+```
+
+Se espera `200 OK` con `status: "CERRADA"`, `closedBy: "admin-1"`, `closedAt` presente y
+`totalAmount` fijado (igual al total en vivo del paso 5, ya congelado). Repetir el mismo
+`GET` del paso 5: el total ya no cambia aunque cambien las reservas de ese día.
+
+## 7. Cerrar una caja ya cerrada (`409`)
+
+```bash
+curl -i -X POST http://localhost:8080/api/tenants/travesia-natural/cash/${CASH_ID}/close \
+  -H "Content-Type: application/json" \
+  -d '{ "actorId": "admin-1" }'
+```
+
+Se espera `409 Conflict` con `{"error":"conflict", ...}` (`CashRegisterClosedException`).
+
+## 8. Corrección sobre caja `CERRADA` (`201`) y sobre caja `ABIERTA` (`409`)
+
+```bash
+curl -i -X POST http://localhost:8080/api/tenants/travesia-natural/cash/${CASH_ID}/corrections \
+  -H "Content-Type: application/json" \
+  -d '{ "justification": "Ajuste por diferencia de arqueo", "actorId": "admin-1" }'
+```
+
+Se espera `201 Created` con la corrección añadida a `corrections`. Abrir una caja nueva
+en otra fecha (repetir el paso 1 con `"businessDate": "2026-09-05"`) e intentar corregirla
+sin cerrarla primero:
+
+```bash
+curl -i -X POST http://localhost:8080/api/tenants/travesia-natural/cash/${CASH_ID_2}/corrections \
+  -H "Content-Type: application/json" \
+  -d '{ "justification": "Ajuste prematuro", "actorId": "admin-1" }'
+```
+
+Se espera `409 Conflict` con `{"error":"conflict", ...}` (`CashRegisterNotClosedException`).
+Cerrar esa segunda caja al terminar (paso 6) para no dejarla `ABIERTA`.
+
+## 9. Histórico de cajas cerradas (`200`)
+
+```bash
+curl -s http://localhost:8080/api/tenants/travesia-natural/cash/history
+```
+
+Se espera `200 OK` con la lista de cajas `CERRADA` del tenant, incluyendo las dos
+abiertas/cerradas en los pasos anteriores, cada una con su `totalAmount` congelado.
+
+## 10. Consolidación mensual (`200`)
+
+```bash
+curl -s "http://localhost:8080/api/tenants/travesia-natural/cash/consolidation?period=2026-09"
+```
+
+Se espera `200 OK` con una lista de un elemento: `period: "2026-09"`, `ingresos`,
+`pagosOperacionales`, `gastos`, `devoluciones`, `cancelaciones` y `costosOperacionales`
+agregados sobre las cajas cerradas del mes. `total` = `ingresos - pagosOperacionales -
+gastos - devoluciones`, **sin sumar `baseAmount`** de cada caja (RN-CAJ-001: "sin sumar
+repetidamente cada base diaria").
+
+## 11. Tenant inexistente (`404`) y tenant `Inactivo` (`409`)
+
+```bash
+curl -i http://localhost:8080/api/tenants/no-existe/cash?businessDate=2026-09-04
+```
+
+Se espera `404 Not Found`. Desactivar `travesia-natural` (paso 5 de la sección "002") y
+repetir cualquier operación de caja (ej. el `GET` anterior con el tenant real): se
+espera `409 Conflict` con `{"error":"tenant_inactive", ...}` — aplica a las 6 operaciones
+de caja, no solo a la apertura. Reactivar el tenant al terminar (paso 6 de esa sección).
+
+## 12. Fecha sin caja abierta (`404`)
+
+```bash
+curl -i "http://localhost:8080/api/tenants/travesia-natural/cash?businessDate=2020-01-01"
+```
+
+Se espera `404 Not Found` con `{"error":"not_found", ...}` (`CashRegisterNotFoundException`).
+
+## 13. Compilación y tests (spec 001 a spec 013)
+
+```bash
+./mvnw test
+```
+
+Deben seguir en verde `contextLoads` y los tests existentes, sin regresiones.
+
+# Plan de verificación — Corrección de persistencia (agregados con hijos)
+
+Hallazgo de `/code-review` sobre spec 013: `CashRegisterRepositoryAdapter.save()`
+reconstruía el agregado completo (todos los movimientos/correcciones como entidades
+nuevas sin id) en cada guardado; como `orphanRemoval = true` no puede emparejarlas con
+las filas ya persistidas, cada guardado borraba y reinsertaba todo el historial. El
+mismo patrón existía en `ReservationRepositoryAdapter` desde spec 001 (reescribía
+`reservedServices` en cada pago/cancelación aunque nunca cambian tras la creación).
+Corregido en `cash` y `reservations`: se carga la entidad existente por id y solo se
+actualizan los campos escalares / se insertan los hijos nuevos, sin tocar los hijos ya
+persistidos. Se agregó `@OrderBy("id ASC")` a las colecciones `@OneToMany` de ambos
+módulos para que el orden de lectura sea determinista (necesario para poder distinguir
+"hijos ya persistidos" de "hijos nuevos" por posición en la lista).
+
+`operations` (`OperationCostRepositoryAdapter`, `ExecutionRepositoryAdapter`) se evaluó
+para uniformidad pero se dejó como inserción directa: `OperationCost` y `Execution` son
+entidades planas sin colecciones hijas y sin caso de uso de edición (se crean una sola
+vez), así que el mismo patrón de "cargar antes de escribir" ahí solo agrega un `SELECT`
+que siempre falla, sin corregir ningún bug real. Verificado además que el Frontend
+(repo `Multitour-Monolito-Portal`) hoy solo consume `reservations` — no tiene ninguna
+pantalla que toque `cash` ni `operations` — por lo que no hay necesidad funcional de
+tocar ese módulo ahora.
+
+## 1. Caja: movimientos incrementales no se pierden ni se duplican
+
+```bash
+CASH_ID=$(curl -s -X POST http://localhost:8080/api/tenants/travesia-natural/cash \
+  -H "Content-Type: application/json" \
+  -d '{ "businessDate": "2026-09-07", "baseAmount": 10000, "actorId": "admin-1" }' \
+  | grep -o '"cashRegisterId":"[^"]*"' | cut -d'"' -f4)
+
+curl -s -X POST http://localhost:8080/api/tenants/travesia-natural/cash/${CASH_ID}/movements \
+  -H "Content-Type: application/json" \
+  -d '{ "type": "INGRESO", "amount": 1000, "concept": "m1", "actorId": "admin-1" }'
+
+curl -s -X POST http://localhost:8080/api/tenants/travesia-natural/cash/${CASH_ID}/movements \
+  -H "Content-Type: application/json" \
+  -d '{ "type": "PAGO", "amount": 200, "concept": "m2", "actorId": "admin-1" }'
+
+curl -s "http://localhost:8080/api/tenants/travesia-natural/cash?businessDate=2026-09-07"
+```
+
+Cada respuesta debe traer los movimientos anteriores intactos (mismo `recordedAt`, sin
+duplicarse) más el nuevo agregado al final. La consulta final debe traer los 2
+movimientos, en el mismo orden en que se registraron.
+
+## 2. Caja: cerrar y corregir no tocan los movimientos ya guardados
+
+```bash
+curl -i -X POST http://localhost:8080/api/tenants/travesia-natural/cash/${CASH_ID}/close \
+  -H "Content-Type: application/json" -d '{ "actorId": "admin-1" }'
+
+curl -i -X POST http://localhost:8080/api/tenants/travesia-natural/cash/${CASH_ID}/corrections \
+  -H "Content-Type: application/json" \
+  -d '{ "justification": "ajuste", "actorId": "admin-1" }'
+```
+
+Ambas respuestas deben seguir trayendo los 2 movimientos originales sin cambios, más
+(en el segundo caso) la corrección agregada.
+
+## 3. Reserva: pagos y cancelación no afectan `reservedServices`
+
+Sobre una reserva `Pendiente de pago` con un solo servicio reservado:
+
+```bash
+curl -s -X POST http://localhost:8080/api/tenants/travesia-natural/reservations/${RES_ID}/payments \
+  -H "Content-Type: application/json" \
+  -d '{ "amount": 100000, "method": "ABONO", "actorId": "admin-1" }'
+
+curl -s -X POST http://localhost:8080/api/tenants/travesia-natural/reservations/${RES_ID}/cancel \
+  -H "Content-Type: application/json" \
+  -d '{ "reason": "prueba", "actorId": "admin-1" }'
+
+curl -s http://localhost:8080/api/tenants/travesia-natural/reservations/${RES_ID}
+```
+
+`reservedServices` debe seguir con el mismo único elemento en las tres respuestas
+(mismo `serviceReference`/`partySize`/`scheduledDate`), mientras `pendingBalance`,
+`paymentStatus`, `reservationStatus`, `cancelledAt`, etc. sí reflejan cada cambio.
+
+## 4. Histórico e informes siguen leyendo correctamente
+
+```bash
+curl -s http://localhost:8080/api/tenants/travesia-natural/cash/history
+curl -s "http://localhost:8080/api/tenants/travesia-natural/cash/consolidation?period=2026-09"
+```
+
+Ambos deben seguir devolviendo `200 OK` con los datos agregados de todas las cajas
+cerradas del tenant, movimientos en orden, sin errores de mapeo.
+
+## 5. Compilación y tests (spec 001 a spec 013, tras la corrección de persistencia)
+
+```bash
+./mvnw test
+```
+
+Deben seguir en verde `contextLoads` y los tests existentes, sin regresiones.
+
+# Plan de verificación — NPE en movimientos sin `type` + doble consulta en consolidación
+
+Dos hallazgos de `/code-review` sobre spec 013, pendientes desde la corrección de
+persistencia:
+
+1. `CashController.registerMovement` llamaba `CashMovementType.valueOf(request.type())`
+   directamente sobre el valor crudo del DTO. Si `type` venía ausente o `null` en el
+   JSON, `Enum.valueOf(_, null)` lanza `NullPointerException` (no
+   `IllegalArgumentException`), sin `@ExceptionHandler` que la capture: la API devolvía
+   `500` en vez del `400` documentado en la spec. `CashMovement` ya validaba
+   `type == null` correctamente en su constructor compacto — el problema era que nunca
+   llegaba a ejecutarse. Corregido dejando pasar `null` a `RegisterCashMovementCommand`
+   en vez de invocar `valueOf` sobre un valor nulo, para que la validación de dominio
+   (única fuente de verdad) haga su trabajo.
+2. `MonthlyCashConsolidationService.getMonthlyConsolidation()` consultaba
+   `reservationRepositoryPort.findAllByTenantId(tenantId)` dos veces en la misma
+   petición: una directa (cancelaciones) y otra dentro de
+   `RefundsTotalCalculator.totalForPeriod` (devoluciones). Corregido consultando una
+   sola vez y reutilizando la misma lista para ambos cálculos;
+   `RefundsTotalCalculator.totalForPeriod` ahora recibe la lista ya cargada en vez de
+   `tenantId` (único llamador, sin otros call sites afectados).
+
+## 1. Movimiento sin `type` devuelve 400, no 500
+
+```bash
+CASH_ID=$(curl -s -X POST http://localhost:8080/api/tenants/travesia-natural/cash \
+  -H "Content-Type: application/json" \
+  -d '{ "businessDate": "2026-09-09", "baseAmount": 5000, "actorId": "admin-1" }' \
+  | grep -o '"cashRegisterId":"[^"]*"' | cut -d'"' -f4)
+
+curl -i -X POST http://localhost:8080/api/tenants/travesia-natural/cash/${CASH_ID}/movements \
+  -H "Content-Type: application/json" \
+  -d '{ "amount": 1000, "concept": "sin tipo", "actorId": "admin-1" }'
+
+curl -i -X POST http://localhost:8080/api/tenants/travesia-natural/cash/${CASH_ID}/movements \
+  -H "Content-Type: application/json" \
+  -d '{ "type": null, "amount": 1000, "concept": "tipo null", "actorId": "admin-1" }'
+```
+
+Ambas deben devolver `400` con `{"error":"validation_error","message":"movement type is
+required"}`. Un `type` inexistente en el enum (ej. `"FOO"`) debe seguir devolviendo
+`400` con el mensaje de `IllegalArgumentException` (ese caso ya funcionaba antes).
+
+## 2. Consolidación mensual sigue devolviendo los mismos valores
+
+```bash
+curl -s "http://localhost:8080/api/tenants/travesia-natural/cash/consolidation?period=2026-09"
+```
+
+Debe seguir devolviendo `200 OK` con los mismos campos y valores que antes del cambio
+(`ingresos`, `pagosOperacionales`, `gastos`, `devoluciones`, `total`, `cancelaciones`,
+`costosOperacionales`) — la única diferencia es una consulta menos a `reservations` por
+petición.
+
+## 3. Compilación y tests
+
+```bash
+./mvnw test
+```
+
+Deben seguir en verde `contextLoads` y los tests existentes, sin regresiones.
