@@ -25,7 +25,7 @@
       devolución sobre saldo a favor": un `curl` por cada criterio de aceptación ·
       repo: backend · depende de T04 · ~20 min
 
-- [ ] T06 — Verificación final: `./mvnw test` en verde y ejecución manual de
+- [x] T06 — Verificación final: `./mvnw test` en verde y ejecución manual de
       `PLAN-VERIFICACION.md` sección 012 contra el servidor local; marcar los
       criterios de aceptación de `spec.md` como cumplidos · repo: backend · depende de
       T05 · requiere permiso explícito para build/tests/servidor (regla 5 de

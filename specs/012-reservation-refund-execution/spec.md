@@ -1,6 +1,6 @@
 # 012 — Ejecución de devolución sobre saldo a favor
 
-**Estado:** APROBADA
+**Estado:** TERMINADA
 **Fecha:** 2026-09-03
 **Repos afectados:** backend (rama `hu-back-001-dev`)
 **HU relacionada:** ninguna HU formal en el backlog cubre esto punto por punto; se basa en
@@ -66,24 +66,24 @@ indefinidamente, sin forma de registrar que el dinero efectivamente salió (o pa
 
 ## Criterios de aceptación
 
-- [ ] Ejecutar devolución total (monto == `creditBalance`) sobre una reserva con
+- [x] Ejecutar devolución total (monto == `creditBalance`) sobre una reserva con
       `SALDO_A_FAVOR_PENDIENTE` devuelve `200`, deja `creditBalance = 0`,
       `paymentStatus = Devuelto parcial o total`, y quedan registrados monto devuelto,
       motivo, actor, método y fecha.
-- [ ] Ejecutar devolución parcial (monto < `creditBalance`) devuelve `200`, deja
+- [x] Ejecutar devolución parcial (monto < `creditBalance`) devuelve `200`, deja
       `creditBalance` reducido por el monto devuelto (no en cero) y
       `paymentStatus = Devuelto parcial o total`.
-- [ ] Ejecutar devolución con monto mayor al `creditBalance` disponible devuelve `400`.
-- [ ] Ejecutar devolución sin motivo o sin actor devuelve `400`.
-- [ ] Ejecutar devolución sobre una reserva sin `SALDO_A_FAVOR_PENDIENTE` (por ejemplo
+- [x] Ejecutar devolución con monto mayor al `creditBalance` disponible devuelve `400`.
+- [x] Ejecutar devolución sin motivo o sin actor devuelve `400`.
+- [x] Ejecutar devolución sobre una reserva sin `SALDO_A_FAVOR_PENDIENTE` (por ejemplo
       `Sin pago`, `Confirmada` sin cancelar, o ya `Devuelto parcial o total`) devuelve
       `409` y no la modifica.
-- [ ] Consultar una reserva con devolución ejecutada devuelve `paymentStatus`,
+- [x] Consultar una reserva con devolución ejecutada devuelve `paymentStatus`,
       `creditBalance` resultantes, junto con monto devuelto, motivo, actor, método y
       fecha de la devolución.
-- [ ] Cualquier operación sobre un `tenantId` inexistente devuelve `404`; sobre uno
+- [x] Cualquier operación sobre un `tenantId` inexistente devuelve `404`; sobre uno
       `Inactivo`, `409`.
-- [ ] El proyecto compila y los tests existentes (specs 001-011) siguen pasando.
+- [x] El proyecto compila y los tests existentes (specs 001-011) siguen pasando.
 
 ## Impacto en multitenencia
 
