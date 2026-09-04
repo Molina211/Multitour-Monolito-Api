@@ -1,6 +1,6 @@
 # 011 — Cancelación de reserva antes de ejecución
 
-**Estado:** APROBADA
+**Estado:** TERMINADA
 **Fecha:** 2026-09-03
 **Repos afectados:** backend (rama `hu-back-001-dev`)
 **HU relacionada:** ninguna HU formal en el backlog cubre esto punto por punto; se basa en
@@ -62,27 +62,27 @@ ocurre.
 
 ## Criterios de aceptación
 
-- [ ] Cancelar una reserva `Pendiente de pago` sin pagos registrados devuelve `200`,
+- [x] Cancelar una reserva `Pendiente de pago` sin pagos registrados devuelve `200`,
       deja `reservationStatus = CANCELADA`, `creditBalance = 0` y `paymentStatus` sin
       cambios (`Sin pago`).
-- [ ] Cancelar una reserva `Confirmada` que ya tiene el valor completo pagado (efectivo
+- [x] Cancelar una reserva `Confirmada` que ya tiene el valor completo pagado (efectivo
       o abono que saldó el pendiente) devuelve `200`, deja `reservationStatus =
       CANCELADA`, `creditBalance` igual al valor pagado y `paymentStatus = Saldo a
       favor pendiente`.
-- [ ] Cancelar una reserva con un abono parcial ya registrado devuelve `200` y deja
+- [x] Cancelar una reserva con un abono parcial ya registrado devuelve `200` y deja
       `creditBalance` igual solo al monto efectivamente abonado (no al valor total).
-- [ ] Cancelar sin indicar motivo devuelve `400`.
-- [ ] Cancelar una reserva que ya está `En ejecucion`, `Finalizada` o `Cancelada`
+- [x] Cancelar sin indicar motivo devuelve `400`.
+- [x] Cancelar una reserva que ya está `En ejecucion`, `Finalizada` o `Cancelada`
       devuelve un código de error (409, mismo criterio de spec 010) y no la modifica.
-- [ ] Cancelar una reserva con una transferencia en espera de aprobación/rechazo
+- [x] Cancelar una reserva con una transferencia en espera de aprobación/rechazo
       (`pendingTransferAmount` presente) devuelve un código de error (409) y no la
       modifica.
-- [ ] Consultar una reserva cancelada devuelve `reservationStatus = Cancelada` y el
+- [x] Consultar una reserva cancelada devuelve `reservationStatus = Cancelada` y el
       `creditBalance`/`paymentStatus` resultantes, junto con el motivo y actor de la
       cancelación.
-- [ ] Cualquier operación sobre un `tenantId` inexistente devuelve `404`; sobre uno
+- [x] Cualquier operación sobre un `tenantId` inexistente devuelve `404`; sobre uno
       `Inactivo`, `409`.
-- [ ] El proyecto compila y los tests existentes (specs 001-010) siguen pasando.
+- [x] El proyecto compila y los tests existentes (specs 001-010) siguen pasando.
 
 ## Impacto en multitenencia
 
