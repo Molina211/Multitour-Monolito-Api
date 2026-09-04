@@ -4,6 +4,7 @@ import com.corhuila.errorcapa8.travesia_natural.reservations.domain.exception.In
 import com.corhuila.errorcapa8.travesia_natural.reservations.domain.exception.PaymentAlreadyResolvedException;
 import com.corhuila.errorcapa8.travesia_natural.reservations.domain.exception.ReservationNotCancellableException;
 import com.corhuila.errorcapa8.travesia_natural.reservations.domain.exception.ReservationNotExecutableException;
+import com.corhuila.errorcapa8.travesia_natural.reservations.domain.exception.ReservationNotRefundableException;
 
 import java.math.BigDecimal;
 import java.time.Instant;
@@ -34,6 +35,11 @@ public final class Reservation {
     private final String cancellationReason;
     private final String cancelledBy;
     private final Instant cancelledAt;
+    private final BigDecimal refundedAmount;
+    private final String refundReason;
+    private final String refundedBy;
+    private final String refundMethod;
+    private final Instant refundedAt;
 
     private Reservation(UUID reservationId, String tenantId, String customerId,
                          List<ReservedService> reservedServices, BigDecimal projectedValue,
@@ -41,7 +47,8 @@ public final class Reservation {
                          ReservationStatus reservationStatus, PaymentStatus paymentStatus,
                          String paymentMethod, Instant createdAt, BigDecimal pendingTransferAmount,
                          String transferSupportReference, String cancellationReason, String cancelledBy,
-                         Instant cancelledAt) {
+                         Instant cancelledAt, BigDecimal refundedAmount, String refundReason,
+                         String refundedBy, String refundMethod, Instant refundedAt) {
         this.reservationId = reservationId;
         this.tenantId = tenantId;
         this.customerId = customerId;
@@ -59,6 +66,11 @@ public final class Reservation {
         this.cancellationReason = cancellationReason;
         this.cancelledBy = cancelledBy;
         this.cancelledAt = cancelledAt;
+        this.refundedAmount = refundedAmount;
+        this.refundReason = refundReason;
+        this.refundedBy = refundedBy;
+        this.refundMethod = refundMethod;
+        this.refundedAt = refundedAt;
     }
 
     /**
@@ -98,6 +110,11 @@ public final class Reservation {
                 null,
                 null,
                 null,
+                null,
+                null,
+                null,
+                null,
+                null,
                 null);
     }
 
@@ -111,10 +128,13 @@ public final class Reservation {
                                             BigDecimal creditBalance, ReservationStatus reservationStatus,
                                             PaymentStatus paymentStatus, String paymentMethod, Instant createdAt,
                                             BigDecimal pendingTransferAmount, String transferSupportReference,
-                                            String cancellationReason, String cancelledBy, Instant cancelledAt) {
+                                            String cancellationReason, String cancelledBy, Instant cancelledAt,
+                                            BigDecimal refundedAmount, String refundReason, String refundedBy,
+                                            String refundMethod, Instant refundedAt) {
         return new Reservation(reservationId, tenantId, customerId, reservedServices, projectedValue, finalValue,
                 pendingBalance, creditBalance, reservationStatus, paymentStatus, paymentMethod, createdAt,
-                pendingTransferAmount, transferSupportReference, cancellationReason, cancelledBy, cancelledAt);
+                pendingTransferAmount, transferSupportReference, cancellationReason, cancelledBy, cancelledAt,
+                refundedAmount, refundReason, refundedBy, refundMethod, refundedAt);
     }
 
     /**
@@ -130,7 +150,7 @@ public final class Reservation {
         }
         return new Reservation(reservationId, tenantId, customerId, reservedServices, projectedValue, finalValue,
                 BigDecimal.ZERO, creditBalance, ReservationStatus.CONFIRMADA, PaymentStatus.PAGADO, "Efectivo",
-                createdAt, null, null, null, null, null);
+                createdAt, null, null, null, null, null, null, null, null, null, null);
     }
 
     /**
@@ -148,7 +168,7 @@ public final class Reservation {
                 newPendingBalance, creditBalance,
                 settled ? ReservationStatus.CONFIRMADA : reservationStatus,
                 settled ? PaymentStatus.PAGADO : PaymentStatus.PARCIAL,
-                "Abono", createdAt, null, null, null, null, null);
+                "Abono", createdAt, null, null, null, null, null, null, null, null, null, null);
     }
 
     /**
@@ -166,7 +186,7 @@ public final class Reservation {
         }
         return new Reservation(reservationId, tenantId, customerId, reservedServices, projectedValue, finalValue,
                 pendingBalance, creditBalance, reservationStatus, PaymentStatus.EN_VALIDACION, "Transferencia",
-                createdAt, amount, supportReference, null, null, null);
+                createdAt, amount, supportReference, null, null, null, null, null, null, null, null);
     }
 
     /**
@@ -180,7 +200,7 @@ public final class Reservation {
         }
         return new Reservation(reservationId, tenantId, customerId, reservedServices, projectedValue, finalValue,
                 pendingBalance, creditBalance, reservationStatus, paymentStatus, paymentMethod, createdAt,
-                pendingTransferAmount, transferSupportReference, null, null, null)
+                pendingTransferAmount, transferSupportReference, null, null, null, null, null, null, null, null)
                 .registerInstallmentPayment(pendingTransferAmount);
     }
 
@@ -195,7 +215,7 @@ public final class Reservation {
         }
         return new Reservation(reservationId, tenantId, customerId, reservedServices, projectedValue, finalValue,
                 pendingBalance, creditBalance, reservationStatus, PaymentStatus.RECHAZADO, paymentMethod,
-                createdAt, null, null, null, null, null);
+                createdAt, null, null, null, null, null, null, null, null, null, null);
     }
 
     /**
@@ -212,7 +232,8 @@ public final class Reservation {
         }
         return new Reservation(reservationId, tenantId, customerId, reservedServices, projectedValue, finalValue,
                 pendingBalance, creditBalance, ReservationStatus.EN_EJECUCION, paymentStatus, paymentMethod,
-                createdAt, pendingTransferAmount, transferSupportReference, null, null, null);
+                createdAt, pendingTransferAmount, transferSupportReference, null, null, null, null, null, null,
+                null, null);
     }
 
     /**
@@ -243,7 +264,43 @@ public final class Reservation {
                 amountAlreadyPaid.signum() > 0 ? PaymentStatus.SALDO_A_FAVOR_PENDIENTE : paymentStatus;
         return new Reservation(reservationId, tenantId, customerId, reservedServices, projectedValue, finalValue,
                 pendingBalance, newCreditBalance, ReservationStatus.CANCELADA, newPaymentStatus, paymentMethod,
-                createdAt, pendingTransferAmount, transferSupportReference, reason, actorId, Instant.now());
+                createdAt, pendingTransferAmount, transferSupportReference, reason, actorId, Instant.now(),
+                null, null, null, null, null);
+    }
+
+    /**
+     * Ejecuta la devolución del saldo a favor generado por una cancelación (spec 012):
+     * solo permitido con `paymentStatus == SALDO_A_FAVOR_PENDIENTE` y `creditBalance >
+     * 0`. Es un paso único (RN-RES-008 separa autorización y ejecución
+     * conceptualmente, pero aquí se cubren en una sola operación, igual que
+     * `cancel()` no separó "solicitar" de "cancelar"): tras ejecutarse, el
+     * `paymentStatus` deja de ser `SALDO_A_FAVOR_PENDIENTE`, así que no admite una
+     * segunda ejecución sobre el mismo saldo, sea total o parcial.
+     */
+    public Reservation refund(BigDecimal amount, String reason, String actorId, String method) {
+        if (reason == null || reason.isBlank()) {
+            throw new InvalidReservationException("refund reason is required");
+        }
+        if (actorId == null || actorId.isBlank()) {
+            throw new InvalidReservationException("refund actorId is required");
+        }
+        if (paymentStatus != PaymentStatus.SALDO_A_FAVOR_PENDIENTE || creditBalance.signum() <= 0) {
+            throw new ReservationNotRefundableException(
+                    "reservation must have a pending credit balance to be refunded, current paymentStatus: "
+                            + paymentStatus.label() + " (reservation: " + reservationId + ")");
+        }
+        if (amount == null || amount.signum() <= 0) {
+            throw new InvalidReservationException("refund amount must be a positive value");
+        }
+        if (amount.compareTo(creditBalance) > 0) {
+            throw new InvalidReservationException(
+                    "refund amount cannot exceed the available creditBalance (reservation: " + reservationId + ")");
+        }
+        BigDecimal newCreditBalance = creditBalance.subtract(amount);
+        return new Reservation(reservationId, tenantId, customerId, reservedServices, projectedValue, finalValue,
+                pendingBalance, newCreditBalance, reservationStatus, PaymentStatus.DEVUELTO_PARCIAL_O_TOTAL,
+                paymentMethod, createdAt, pendingTransferAmount, transferSupportReference, cancellationReason,
+                cancelledBy, cancelledAt, amount, reason, actorId, method, Instant.now());
     }
 
     private void validatePaymentAmount(BigDecimal amount) {
@@ -318,5 +375,25 @@ public final class Reservation {
 
     public Instant cancelledAt() {
         return cancelledAt;
+    }
+
+    public BigDecimal refundedAmount() {
+        return refundedAmount;
+    }
+
+    public String refundReason() {
+        return refundReason;
+    }
+
+    public String refundedBy() {
+        return refundedBy;
+    }
+
+    public String refundMethod() {
+        return refundMethod;
+    }
+
+    public Instant refundedAt() {
+        return refundedAt;
     }
 }

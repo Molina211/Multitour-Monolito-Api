@@ -66,6 +66,21 @@ public class ReservationEntity {
     @Column(name = "cancelled_at")
     private Instant cancelledAt;
 
+    @Column(name = "refunded_amount")
+    private BigDecimal refundedAmount;
+
+    @Column(name = "refund_reason")
+    private String refundReason;
+
+    @Column(name = "refunded_by")
+    private String refundedBy;
+
+    @Column(name = "refund_method")
+    private String refundMethod;
+
+    @Column(name = "refunded_at")
+    private Instant refundedAt;
+
     @OneToMany(mappedBy = "reservation", cascade = CascadeType.ALL, orphanRemoval = true)
     private List<ReservedServiceEntity> reservedServices = new ArrayList<>();
 
@@ -77,7 +92,9 @@ public class ReservationEntity {
                               BigDecimal finalValue, BigDecimal pendingBalance, BigDecimal creditBalance,
                               String reservationStatus, String paymentStatus, String paymentMethod,
                               Instant createdAt, BigDecimal pendingTransferAmount, String transferSupportReference,
-                              String cancellationReason, String cancelledBy, Instant cancelledAt) {
+                              String cancellationReason, String cancelledBy, Instant cancelledAt,
+                              BigDecimal refundedAmount, String refundReason, String refundedBy,
+                              String refundMethod, Instant refundedAt) {
         this.reservationId = reservationId;
         this.tenantId = tenantId;
         this.customerId = customerId;
@@ -94,6 +111,11 @@ public class ReservationEntity {
         this.cancellationReason = cancellationReason;
         this.cancelledBy = cancelledBy;
         this.cancelledAt = cancelledAt;
+        this.refundedAmount = refundedAmount;
+        this.refundReason = refundReason;
+        this.refundedBy = refundedBy;
+        this.refundMethod = refundMethod;
+        this.refundedAt = refundedAt;
     }
 
     public void addReservedService(ReservedServiceEntity reservedService) {
@@ -163,6 +185,26 @@ public class ReservationEntity {
 
     public Instant getCancelledAt() {
         return cancelledAt;
+    }
+
+    public BigDecimal getRefundedAmount() {
+        return refundedAmount;
+    }
+
+    public String getRefundReason() {
+        return refundReason;
+    }
+
+    public String getRefundedBy() {
+        return refundedBy;
+    }
+
+    public String getRefundMethod() {
+        return refundMethod;
+    }
+
+    public Instant getRefundedAt() {
+        return refundedAt;
     }
 
     public List<ReservedServiceEntity> getReservedServices() {
