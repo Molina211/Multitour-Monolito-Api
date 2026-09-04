@@ -10,10 +10,10 @@
 
   *(fin lote 1: T01-T02)*
 
-- [ ] T03 — Puertos out (`ExecutionRepositoryPort`, `OperationCostRepositoryPort`) +
+- [x] T03 — Puertos out (`ExecutionRepositoryPort`, `OperationCostRepositoryPort`) +
       entidades JPA + adapters (`ExecutionEntity`/`OperationCostEntity`, repos Spring
       Data, adapters) · repo: backend · depende de T02 · ~25 min
-- [ ] T04 — Puertos in + servicios: `RegisterExecutionCommand`/`UseCase`/`Service`
+- [x] T04 — Puertos in + servicios: `RegisterExecutionCommand`/`UseCase`/`Service`
       (usa `Reservation.startExecution()`, guarda `Reservation` + `Execution`) y
       `ExecutionQueryUseCase`/`Service` (consultar ejecución de una reserva,
       `ExecutionNotFoundException`) · repo: backend · depende de T03 · ~30 min
