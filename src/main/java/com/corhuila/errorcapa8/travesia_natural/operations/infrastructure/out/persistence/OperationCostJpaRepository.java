@@ -9,4 +9,6 @@ public interface OperationCostJpaRepository extends JpaRepository<OperationCostE
 
     List<OperationCostEntity> findAllByTenantIdAndReservationIdOrderByRecordedAtAsc(String tenantId,
                                                                                      UUID reservationId);
+
+    List<OperationCostEntity> findAllByTenantId(String tenantId);
 }

@@ -38,6 +38,13 @@ public class OperationCostRepositoryAdapter implements OperationCostRepositoryPo
                 .toList();
     }
 
+    @Override
+    public List<OperationCost> findAllByTenantId(String tenantId) {
+        return jpaRepository.findAllByTenantId(tenantId).stream()
+                .map(OperationCostRepositoryAdapter::toDomain)
+                .toList();
+    }
+
     private static OperationCost toDomain(OperationCostEntity entity) {
         return OperationCost.reconstitute(
                 entity.getCostId(),

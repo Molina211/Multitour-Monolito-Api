@@ -1550,3 +1550,167 @@ sección).
 ```
 
 Deben seguir en verde `contextLoads` y los tests existentes, sin regresiones.
+
+# Plan de verificación — 013 Caja diaria
+
+Todos los endpoints cuelgan de `/api/tenants/{tenantId}/cash`, usando `travesia-natural`
+(debe estar `Activo`). Guardar el `cashRegisterId` devuelto en `${CASH_ID}` para los
+pasos siguientes.
+
+## 1. Abrir caja del día (`201`)
+
+```bash
+curl -i -X POST http://localhost:8080/api/tenants/travesia-natural/cash \
+  -H "Content-Type: application/json" \
+  -d '{ "businessDate": "2026-09-04", "baseAmount": 50000, "actorId": "admin-1" }'
+```
+
+Se espera `201 Created` con `status: "ABIERTA"`, `baseAmount: 50000`, `movements: []`,
+`corrections: []`, `totalAmount: null`.
+
+## 2. Abrir una segunda caja para la misma fecha (`409`)
+
+```bash
+curl -i -X POST http://localhost:8080/api/tenants/travesia-natural/cash \
+  -H "Content-Type: application/json" \
+  -d '{ "businessDate": "2026-09-04", "baseAmount": 10000, "actorId": "admin-1" }'
+```
+
+Se espera `409 Conflict` con `{"error":"conflict", ...}` (`CashRegisterAlreadyOpenException`).
+
+## 3. Registrar movimientos `INGRESO`, `PAGO` y `GASTO` (`201`)
+
+```bash
+curl -i -X POST http://localhost:8080/api/tenants/travesia-natural/cash/${CASH_ID}/movements \
+  -H "Content-Type: application/json" \
+  -d '{ "type": "INGRESO", "amount": 100000, "concept": "Venta de tour", "actorId": "admin-1" }'
+
+curl -i -X POST http://localhost:8080/api/tenants/travesia-natural/cash/${CASH_ID}/movements \
+  -H "Content-Type: application/json" \
+  -d '{ "type": "PAGO", "amount": 20000, "concept": "Pago a guía", "actorId": "admin-1" }'
+
+curl -i -X POST http://localhost:8080/api/tenants/travesia-natural/cash/${CASH_ID}/movements \
+  -H "Content-Type: application/json" \
+  -d '{ "type": "GASTO", "amount": 5000, "concept": "Combustible", "actorId": "admin-1" }'
+```
+
+Cada uno responde `201 Created` con el movimiento añadido a la lista `movements` y
+`totalAmount` sigue `null` (caja `ABIERTA`, todavía sin congelar).
+
+## 4. Registrar un movimiento `DEVOLUCION` (`400`)
+
+Las devoluciones nunca se registran como movimiento manual: se calculan en vivo desde
+`reservations` (paso 5). `CashMovementType` deliberadamente no incluye `DEVOLUCION`:
+
+```bash
+curl -i -X POST http://localhost:8080/api/tenants/travesia-natural/cash/${CASH_ID}/movements \
+  -H "Content-Type: application/json" \
+  -d '{ "type": "DEVOLUCION", "amount": 1000, "concept": "Devolucion manual", "actorId": "admin-1" }'
+```
+
+Se espera `400 Bad Request` con `{"error":"validation_error", ...}`
+(`CashMovementType.valueOf("DEVOLUCION")` lanza `IllegalArgumentException`).
+
+## 5. Consultar la caja abierta con total en vivo (`200`)
+
+```bash
+curl -s "http://localhost:8080/api/tenants/travesia-natural/cash?businessDate=2026-09-04"
+```
+
+Se espera `200 OK` con `status: "ABIERTA"` y `totalAmount` calculado en vivo como
+`baseAmount + ingresos - pagos - gastos - devoluciones del día` (sin persistirse:
+`GET` sucesivos recalculan, no guardan). Las devoluciones se traen de reservas reales
+con `refundedAt` ese mismo `businessDate` (sección "012"): si hay reservas devueltas
+ese día, el total las descuenta aunque no exista ningún movimiento `DEVOLUCION`
+persistido — es la integración cruzada `cash` → `reservations` (`RefundsTotalCalculator`).
+
+## 6. Cerrar la caja (`200`, total congelado)
+
+```bash
+curl -i -X POST http://localhost:8080/api/tenants/travesia-natural/cash/${CASH_ID}/close \
+  -H "Content-Type: application/json" \
+  -d '{ "actorId": "admin-1" }'
+```
+
+Se espera `200 OK` con `status: "CERRADA"`, `closedBy: "admin-1"`, `closedAt` presente y
+`totalAmount` fijado (igual al total en vivo del paso 5, ya congelado). Repetir el mismo
+`GET` del paso 5: el total ya no cambia aunque cambien las reservas de ese día.
+
+## 7. Cerrar una caja ya cerrada (`409`)
+
+```bash
+curl -i -X POST http://localhost:8080/api/tenants/travesia-natural/cash/${CASH_ID}/close \
+  -H "Content-Type: application/json" \
+  -d '{ "actorId": "admin-1" }'
+```
+
+Se espera `409 Conflict` con `{"error":"conflict", ...}` (`CashRegisterClosedException`).
+
+## 8. Corrección sobre caja `CERRADA` (`201`) y sobre caja `ABIERTA` (`409`)
+
+```bash
+curl -i -X POST http://localhost:8080/api/tenants/travesia-natural/cash/${CASH_ID}/corrections \
+  -H "Content-Type: application/json" \
+  -d '{ "justification": "Ajuste por diferencia de arqueo", "actorId": "admin-1" }'
+```
+
+Se espera `201 Created` con la corrección añadida a `corrections`. Abrir una caja nueva
+en otra fecha (repetir el paso 1 con `"businessDate": "2026-09-05"`) e intentar corregirla
+sin cerrarla primero:
+
+```bash
+curl -i -X POST http://localhost:8080/api/tenants/travesia-natural/cash/${CASH_ID_2}/corrections \
+  -H "Content-Type: application/json" \
+  -d '{ "justification": "Ajuste prematuro", "actorId": "admin-1" }'
+```
+
+Se espera `409 Conflict` con `{"error":"conflict", ...}` (`CashRegisterNotClosedException`).
+Cerrar esa segunda caja al terminar (paso 6) para no dejarla `ABIERTA`.
+
+## 9. Histórico de cajas cerradas (`200`)
+
+```bash
+curl -s http://localhost:8080/api/tenants/travesia-natural/cash/history
+```
+
+Se espera `200 OK` con la lista de cajas `CERRADA` del tenant, incluyendo las dos
+abiertas/cerradas en los pasos anteriores, cada una con su `totalAmount` congelado.
+
+## 10. Consolidación mensual (`200`)
+
+```bash
+curl -s "http://localhost:8080/api/tenants/travesia-natural/cash/consolidation?period=2026-09"
+```
+
+Se espera `200 OK` con una lista de un elemento: `period: "2026-09"`, `ingresos`,
+`pagosOperacionales`, `gastos`, `devoluciones`, `cancelaciones` y `costosOperacionales`
+agregados sobre las cajas cerradas del mes. `total` = `ingresos - pagosOperacionales -
+gastos - devoluciones`, **sin sumar `baseAmount`** de cada caja (RN-CAJ-001: "sin sumar
+repetidamente cada base diaria").
+
+## 11. Tenant inexistente (`404`) y tenant `Inactivo` (`409`)
+
+```bash
+curl -i http://localhost:8080/api/tenants/no-existe/cash?businessDate=2026-09-04
+```
+
+Se espera `404 Not Found`. Desactivar `travesia-natural` (paso 5 de la sección "002") y
+repetir cualquier operación de caja (ej. el `GET` anterior con el tenant real): se
+espera `409 Conflict` con `{"error":"tenant_inactive", ...}` — aplica a las 6 operaciones
+de caja, no solo a la apertura. Reactivar el tenant al terminar (paso 6 de esa sección).
+
+## 12. Fecha sin caja abierta (`404`)
+
+```bash
+curl -i "http://localhost:8080/api/tenants/travesia-natural/cash?businessDate=2020-01-01"
+```
+
+Se espera `404 Not Found` con `{"error":"not_found", ...}` (`CashRegisterNotFoundException`).
+
+## 13. Compilación y tests (spec 001 a spec 013)
+
+```bash
+./mvnw test
+```
+
+Deben seguir en verde `contextLoads` y los tests existentes, sin regresiones.
