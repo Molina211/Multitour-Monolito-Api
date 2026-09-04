@@ -20,11 +20,11 @@
 
   *(fin lote 2: T03-T04)*
 
-- [ ] T05 — Puertos in + servicios: `RegisterOperationCostCommand`/`UseCase`/`Service`
+- [x] T05 — Puertos in + servicios: `RegisterOperationCostCommand`/`UseCase`/`Service`
       (exige `EN_EJECUCION`, nueva `ExecutionNotStartedException`) y
       `OperationCostQueryUseCase`/`Service` (listar costos por reserva, orden
       cronológico) · repo: backend · depende de T04 · ~25 min
-- [ ] T06 — `OperationController` (endpoints `POST`/`GET .../execution`,
+- [x] T06 — `OperationController` (endpoints `POST`/`GET .../execution`,
       `GET /reservations/pending-execution`, `POST`/`GET .../costs`) + DTOs
       request/response + manejo de excepciones (400/404/409) · repo: backend ·
       depende de T05 · ~30 min
