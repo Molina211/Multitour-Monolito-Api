@@ -2,6 +2,7 @@ package com.corhuila.errorcapa8.travesia_natural.reservations.domain.model;
 
 import com.corhuila.errorcapa8.travesia_natural.reservations.domain.exception.InvalidReservationException;
 import com.corhuila.errorcapa8.travesia_natural.reservations.domain.exception.PaymentAlreadyResolvedException;
+import com.corhuila.errorcapa8.travesia_natural.reservations.domain.exception.ReservationNotExecutableException;
 
 import java.math.BigDecimal;
 import java.time.Instant;
@@ -183,6 +184,23 @@ public final class Reservation {
         return new Reservation(reservationId, tenantId, customerId, reservedServices, projectedValue, finalValue,
                 pendingBalance, creditBalance, reservationStatus, PaymentStatus.RECHAZADO, paymentMethod,
                 createdAt, null, null);
+    }
+
+    /**
+     * Inicia la ejecución de la reserva (spec 010): solo permitido desde `Confirmada`.
+     * El mismo guard cubre tanto "nunca se confirmó" como "ya se está ejecutando" (o
+     * ya finalizó/canceló), porque tras la primera ejecución el estado deja de ser
+     * `Confirmada`.
+     */
+    public Reservation startExecution() {
+        if (reservationStatus != ReservationStatus.CONFIRMADA) {
+            throw new ReservationNotExecutableException(
+                    "reservation must be Confirmada to start execution, current status: "
+                            + reservationStatus.label() + " (reservation: " + reservationId + ")");
+        }
+        return new Reservation(reservationId, tenantId, customerId, reservedServices, projectedValue, finalValue,
+                pendingBalance, creditBalance, ReservationStatus.EN_EJECUCION, paymentStatus, paymentMethod,
+                createdAt, pendingTransferAmount, transferSupportReference);
     }
 
     private void validatePaymentAmount(BigDecimal amount) {
