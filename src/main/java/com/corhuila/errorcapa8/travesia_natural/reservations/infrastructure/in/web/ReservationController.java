@@ -7,6 +7,7 @@ import com.corhuila.errorcapa8.travesia_natural.reservations.domain.exception.Re
 import com.corhuila.errorcapa8.travesia_natural.reservations.domain.exception.ReservationNotFoundException;
 import com.corhuila.errorcapa8.travesia_natural.reservations.domain.exception.ReservationNotRefundableException;
 import com.corhuila.errorcapa8.travesia_natural.reservations.domain.exception.TenantMismatchException;
+import com.corhuila.errorcapa8.travesia_natural.reservations.domain.model.Companion;
 import com.corhuila.errorcapa8.travesia_natural.reservations.domain.model.Reservation;
 import com.corhuila.errorcapa8.travesia_natural.reservations.domain.model.ReservedService;
 import com.corhuila.errorcapa8.travesia_natural.reservations.domain.port.in.CancelReservationCommand;
@@ -20,6 +21,7 @@ import com.corhuila.errorcapa8.travesia_natural.reservations.domain.port.in.Refu
 import com.corhuila.errorcapa8.travesia_natural.reservations.domain.port.in.ReservationQueryUseCase;
 import com.corhuila.errorcapa8.travesia_natural.common.web.dto.ErrorResponse;
 import com.corhuila.errorcapa8.travesia_natural.reservations.infrastructure.in.web.dto.CancelReservationRequest;
+import com.corhuila.errorcapa8.travesia_natural.reservations.infrastructure.in.web.dto.CompanionRequest;
 import com.corhuila.errorcapa8.travesia_natural.reservations.infrastructure.in.web.dto.CreateReservationRequest;
 import com.corhuila.errorcapa8.travesia_natural.reservations.infrastructure.in.web.dto.FinalizeReservationRequest;
 import com.corhuila.errorcapa8.travesia_natural.reservations.infrastructure.in.web.dto.RefundReservationRequest;
@@ -95,9 +97,11 @@ public class ReservationController {
         }
 
         List<ReservedService> reservedServices = toDomainReservedServices(request.reservedServices());
+        List<Companion> companions = toDomainCompanions(request.companions());
 
         CreateReservationCommand command = new CreateReservationCommand(
-                tenantId, principal.membershipId(), request.projectedValue(), reservedServices);
+                tenantId, principal.membershipId(), request.projectedValue(), reservedServices,
+                request.holderDocument(), companions);
 
         Reservation reservation = createReservationUseCase.createReservation(command);
 
@@ -192,6 +196,15 @@ public class ReservationController {
         }
         return requests.stream()
                 .map(r -> new ReservedService(r.serviceReference(), r.partySize(), r.scheduledDate()))
+                .toList();
+    }
+
+    private List<Companion> toDomainCompanions(List<CompanionRequest> requests) {
+        if (requests == null) {
+            return List.of();
+        }
+        return requests.stream()
+                .map(r -> new Companion(r.name(), r.document(), r.birthDate()))
                 .toList();
     }
 

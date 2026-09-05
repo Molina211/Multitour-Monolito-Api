@@ -2388,3 +2388,122 @@ alterado) devolvieron los códigos HTTP y payloads exactos documentados arriba. 
 tercer criterio de aceptación de `spec.md` (finalizar sin `Execution` registrada)
 no se probó en runtime: no existe forma de llegar a ese estado por el flujo
 normal, por la garantía de atomicidad documentada en `plan.md`.
+
+## 018 — Acompañantes individualizados en la reserva
+
+Corresponde a `specs/018-reservation-companions/`. Agrega `holderDocument` y
+`companions` (nombre, documento, fecha de nacimiento) a la creación de reservas
+(mismo endpoint `POST .../reservations` de spec 001), con la invariante RN-RES-005
+(sin documentos repetidos dentro de la misma reserva) y su reflejo en `GET`. Requiere
+Postgres arriba, la app corriendo, el tenant `travesia-natural` `Activo`, y un token
+válido de `laura.gomez@example.com` (sección "007", pasos 1-2).
+
+```bash
+TOKEN="<accessToken de la sección 007, paso 1>"
+```
+
+### 1. Compilación y tests
+
+```bash
+./mvnw test
+```
+
+Debe mantener `contextLoads` en verde, con la migración a versión 15 confirmada
+(tabla `reservation_companions` y columna `holder_document` en `reservations`).
+
+### 2. Crear una reserva con `holderDocument` y `companions` sin duplicados (`201`)
+
+```bash
+curl -s -X POST http://localhost:8080/api/tenants/travesia-natural/reservations \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer ${TOKEN}" \
+  -d '{
+        "projectedValue": 300000,
+        "reservedServices": [
+          { "serviceReference": "tour-laguna-verde", "partySize": 3, "scheduledDate": "2026-10-20" }
+        ],
+        "holderDocument": "1001-234567",
+        "companions": [
+          { "name": "Ana Torres", "document": "1002345678", "birthDate": "1998-05-12" },
+          { "name": "Luis Torres", "document": "1003456789", "birthDate": "2015-03-01" }
+        ]
+      }'
+```
+
+Se espera `201 Created` con `holderDocument: "1001-234567"` y `companions` con los
+dos registros completos (`name`, `document`, `birthDate`). Guardar el
+`reservationId` devuelto como `RES_S`.
+
+### 3. Crear una reserva sin `holderDocument` ni `companions` (`201`, compatibilidad)
+
+```bash
+curl -i -X POST http://localhost:8080/api/tenants/travesia-natural/reservations \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer ${TOKEN}" \
+  -d '{ "projectedValue": 150000, "reservedServices": [{ "serviceReference": "tour-laguna-verde", "partySize": 1, "scheduledDate": "2026-10-21" }] }'
+```
+
+Se espera `201 Created`, igual que antes de esta spec, con `holderDocument: null` y
+`companions: []`.
+
+### 4. Documento de un acompañante igual al `holderDocument` (`400`, RN-RES-005)
+
+```bash
+curl -i -X POST http://localhost:8080/api/tenants/travesia-natural/reservations \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer ${TOKEN}" \
+  -d '{
+        "projectedValue": 150000,
+        "reservedServices": [{ "serviceReference": "tour-laguna-verde", "partySize": 2, "scheduledDate": "2026-10-22" }],
+        "holderDocument": "1001-234567",
+        "companions": [{ "name": "Duplicado Titular", "document": "1001234567", "birthDate": "1990-01-01" }]
+      }'
+```
+
+Se espera `400 Bad Request` con `{"error":"validation_error", ...}` — nótese que
+`"1001-234567"` y `"1001234567"` se normalizan al mismo valor (trim, minúsculas,
+solo alfanumérico) y cuentan como el mismo documento. No debe quedar reserva creada.
+
+### 5. Dos acompañantes con el mismo documento (`400`, RN-RES-005)
+
+```bash
+curl -i -X POST http://localhost:8080/api/tenants/travesia-natural/reservations \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer ${TOKEN}" \
+  -d '{
+        "projectedValue": 150000,
+        "reservedServices": [{ "serviceReference": "tour-laguna-verde", "partySize": 2, "scheduledDate": "2026-10-22" }],
+        "companions": [
+          { "name": "Acompanante Uno", "document": "9998887777", "birthDate": "1990-01-01" },
+          { "name": "Acompanante Dos", "document": "9998887777", "birthDate": "1991-02-02" }
+        ]
+      }'
+```
+
+Se espera `400 Bad Request` con `{"error":"validation_error", ...}`. No debe quedar
+reserva creada.
+
+### 6. `GET` de la reserva refleja `holderDocument` y `companions` (`200`)
+
+```bash
+curl -s http://localhost:8080/api/tenants/travesia-natural/reservations/${RES_S}
+```
+
+Se espera `200 OK` con `holderDocument` y `companions` idénticos a los enviados en
+el paso 2. Repetir con el listado (`GET .../reservations`) y confirmar que `RES_S`
+aparece con los mismos datos.
+
+Ejecutado el 2026-09-05 contra la base de desarrollo local (mismo Postgres
+`multitour-postgres`, tenant `travesia-natural`, cliente `laura.gomez@example.com`
+existente). La migración V15 requirió una corrección: la primera versión creaba
+`reservation_companions.tenant_id` como `UUID`, inconsistente con el `VARCHAR(50)`
+que `tenant_id` usa en el resto del esquema desde `V5` — Hibernate lo detectó como
+`SchemaManagementException` al validar el esquema en `./mvnw test`. Se corrigió la
+migración a `VARCHAR(50) REFERENCES tenants(tenant_id)` y se revirtió manualmente el
+estado ya aplicado en la base de desarrollo local (sin datos de producción
+afectados) antes de reaplicarla. `./mvnw test` en verde (`contextLoads`, migración a
+versión 15 confirmada) antes de levantar la app. Los 5 pasos de `curl` de esta
+sección (creación con acompañantes válidos, creación sin campos opcionales, rechazo
+por documento duplicado con el titular, rechazo por documento duplicado entre
+acompañantes, y `GET`/listado reflejando los datos guardados) devolvieron los
+códigos HTTP y payloads exactos documentados arriba.

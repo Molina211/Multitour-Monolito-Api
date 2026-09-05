@@ -88,9 +88,16 @@ public class ReservationEntity {
     @Column(name = "finalized_at")
     private Instant finalizedAt;
 
+    @Column(name = "holder_document")
+    private String holderDocument;
+
     @OneToMany(mappedBy = "reservation", cascade = CascadeType.ALL, orphanRemoval = true)
     @OrderBy("id ASC")
     private List<ReservedServiceEntity> reservedServices = new ArrayList<>();
+
+    @OneToMany(mappedBy = "reservation", cascade = CascadeType.ALL, orphanRemoval = true)
+    @OrderBy("id ASC")
+    private List<CompanionEntity> companions = new ArrayList<>();
 
     protected ReservationEntity() {
         // JPA
@@ -102,7 +109,8 @@ public class ReservationEntity {
                               Instant createdAt, BigDecimal pendingTransferAmount, String transferSupportReference,
                               String cancellationReason, String cancelledBy, Instant cancelledAt,
                               BigDecimal refundedAmount, String refundReason, String refundedBy,
-                              String refundMethod, Instant refundedAt, String finalizedBy, Instant finalizedAt) {
+                              String refundMethod, Instant refundedAt, String finalizedBy, Instant finalizedAt,
+                              String holderDocument) {
         this.reservationId = reservationId;
         this.tenantId = tenantId;
         this.customerId = customerId;
@@ -126,6 +134,7 @@ public class ReservationEntity {
         this.refundedAt = refundedAt;
         this.finalizedBy = finalizedBy;
         this.finalizedAt = finalizedAt;
+        this.holderDocument = holderDocument;
     }
 
     /**
@@ -163,6 +172,11 @@ public class ReservationEntity {
     public void addReservedService(ReservedServiceEntity reservedService) {
         reservedService.assignTo(this);
         this.reservedServices.add(reservedService);
+    }
+
+    public void addCompanion(CompanionEntity companion) {
+        companion.assignTo(this);
+        this.companions.add(companion);
     }
 
     public UUID getReservationId() {
@@ -259,5 +273,13 @@ public class ReservationEntity {
 
     public List<ReservedServiceEntity> getReservedServices() {
         return reservedServices;
+    }
+
+    public String getHolderDocument() {
+        return holderDocument;
+    }
+
+    public List<CompanionEntity> getCompanions() {
+        return companions;
     }
 }

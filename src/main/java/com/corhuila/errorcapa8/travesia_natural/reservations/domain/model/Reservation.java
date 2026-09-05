@@ -9,7 +9,10 @@ import com.corhuila.errorcapa8.travesia_natural.reservations.domain.exception.Re
 
 import java.math.BigDecimal;
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 import java.util.UUID;
 
 /**
@@ -43,6 +46,8 @@ public final class Reservation {
     private final Instant refundedAt;
     private final String finalizedBy;
     private final Instant finalizedAt;
+    private final String holderDocument;
+    private final List<Companion> companions;
 
     private Reservation(UUID reservationId, String tenantId, String customerId,
                          List<ReservedService> reservedServices, BigDecimal projectedValue,
@@ -52,7 +57,8 @@ public final class Reservation {
                          String transferSupportReference, String cancellationReason, String cancelledBy,
                          Instant cancelledAt, BigDecimal refundedAmount, String refundReason,
                          String refundedBy, String refundMethod, Instant refundedAt,
-                         String finalizedBy, Instant finalizedAt) {
+                         String finalizedBy, Instant finalizedAt, String holderDocument,
+                         List<Companion> companions) {
         this.reservationId = reservationId;
         this.tenantId = tenantId;
         this.customerId = customerId;
@@ -77,6 +83,8 @@ public final class Reservation {
         this.refundedAt = refundedAt;
         this.finalizedBy = finalizedBy;
         this.finalizedAt = finalizedAt;
+        this.holderDocument = holderDocument;
+        this.companions = companions;
     }
 
     /**
@@ -85,7 +93,8 @@ public final class Reservation {
      * decision), not by this factory, so it can be known before persistence.
      */
     public static Reservation create(UUID reservationId, String tenantId, String customerId,
-                                      BigDecimal projectedValue, List<ReservedService> reservedServices) {
+                                      BigDecimal projectedValue, List<ReservedService> reservedServices,
+                                      String holderDocument, List<Companion> companions) {
         if (tenantId == null || tenantId.isBlank()) {
             throw new InvalidReservationException("tenantId is required");
         }
@@ -98,6 +107,8 @@ public final class Reservation {
         if (projectedValue == null || projectedValue.signum() < 0) {
             throw new InvalidReservationException("projectedValue must be a non-negative amount");
         }
+        List<Companion> safeCompanions = companions == null ? List.of() : List.copyOf(companions);
+        requireNoDuplicateDocuments(holderDocument, safeCompanions);
 
         return new Reservation(
                 reservationId,
@@ -123,7 +134,38 @@ public final class Reservation {
                 null,
                 null,
                 null,
-                null);
+                null,
+                holderDocument,
+                safeCompanions);
+    }
+
+    /**
+     * RN-RES-005: el documento del titular no puede repetirse con el de ningún
+     * acompañante, ni un acompañante repetir el documento de otro, dentro de la misma
+     * reserva. La comparación normaliza (mismo criterio que ya usa el Frontend en
+     * {@code normalizeDocument()}: trim, minúsculas, solo alfanumérico) para que
+     * variaciones de formato del mismo documento cuenten como duplicado; el valor
+     * guardado no se modifica.
+     */
+    private static void requireNoDuplicateDocuments(String holderDocument, List<Companion> companions) {
+        List<String> normalizedDocuments = new ArrayList<>();
+        if (holderDocument != null && !holderDocument.isBlank()) {
+            normalizedDocuments.add(normalizeDocument(holderDocument));
+        }
+        for (Companion companion : companions) {
+            normalizedDocuments.add(normalizeDocument(companion.document()));
+        }
+        Set<String> seen = new HashSet<>();
+        for (String document : normalizedDocuments) {
+            if (!seen.add(document)) {
+                throw new InvalidReservationException(
+                        "duplicate document within the same reservation is not allowed (RN-RES-005)");
+            }
+        }
+    }
+
+    private static String normalizeDocument(String value) {
+        return value.trim().toLowerCase().replaceAll("[^a-z0-9]", "");
     }
 
     /**
@@ -139,11 +181,12 @@ public final class Reservation {
                                             String cancellationReason, String cancelledBy, Instant cancelledAt,
                                             BigDecimal refundedAmount, String refundReason, String refundedBy,
                                             String refundMethod, Instant refundedAt, String finalizedBy,
-                                            Instant finalizedAt) {
+                                            Instant finalizedAt, String holderDocument, List<Companion> companions) {
         return new Reservation(reservationId, tenantId, customerId, reservedServices, projectedValue, finalValue,
                 pendingBalance, creditBalance, reservationStatus, paymentStatus, paymentMethod, createdAt,
                 pendingTransferAmount, transferSupportReference, cancellationReason, cancelledBy, cancelledAt,
-                refundedAmount, refundReason, refundedBy, refundMethod, refundedAt, finalizedBy, finalizedAt);
+                refundedAmount, refundReason, refundedBy, refundMethod, refundedAt, finalizedBy, finalizedAt,
+                holderDocument, companions);
     }
 
     /**
@@ -159,7 +202,8 @@ public final class Reservation {
         }
         return new Reservation(reservationId, tenantId, customerId, reservedServices, projectedValue, finalValue,
                 BigDecimal.ZERO, creditBalance, ReservationStatus.CONFIRMADA, PaymentStatus.PAGADO, "Efectivo",
-                createdAt, null, null, null, null, null, null, null, null, null, null, null, null);
+                createdAt, null, null, null, null, null, null, null, null, null, null, null, null,
+                holderDocument, companions);
     }
 
     /**
@@ -177,7 +221,8 @@ public final class Reservation {
                 newPendingBalance, creditBalance,
                 settled ? ReservationStatus.CONFIRMADA : reservationStatus,
                 settled ? PaymentStatus.PAGADO : PaymentStatus.PARCIAL,
-                "Abono", createdAt, null, null, null, null, null, null, null, null, null, null, null, null);
+                "Abono", createdAt, null, null, null, null, null, null, null, null, null, null, null, null,
+                holderDocument, companions);
     }
 
     /**
@@ -195,7 +240,8 @@ public final class Reservation {
         }
         return new Reservation(reservationId, tenantId, customerId, reservedServices, projectedValue, finalValue,
                 pendingBalance, creditBalance, reservationStatus, PaymentStatus.EN_VALIDACION, "Transferencia",
-                createdAt, amount, supportReference, null, null, null, null, null, null, null, null, null, null);
+                createdAt, amount, supportReference, null, null, null, null, null, null, null, null, null, null,
+                holderDocument, companions);
     }
 
     /**
@@ -210,7 +256,7 @@ public final class Reservation {
         return new Reservation(reservationId, tenantId, customerId, reservedServices, projectedValue, finalValue,
                 pendingBalance, creditBalance, reservationStatus, paymentStatus, paymentMethod, createdAt,
                 pendingTransferAmount, transferSupportReference, null, null, null, null, null, null, null, null,
-                null, null)
+                null, null, holderDocument, companions)
                 .registerInstallmentPayment(pendingTransferAmount);
     }
 
@@ -225,7 +271,8 @@ public final class Reservation {
         }
         return new Reservation(reservationId, tenantId, customerId, reservedServices, projectedValue, finalValue,
                 pendingBalance, creditBalance, reservationStatus, PaymentStatus.RECHAZADO, paymentMethod,
-                createdAt, null, null, null, null, null, null, null, null, null, null, null, null);
+                createdAt, null, null, null, null, null, null, null, null, null, null, null, null,
+                holderDocument, companions);
     }
 
     /**
@@ -243,7 +290,7 @@ public final class Reservation {
         return new Reservation(reservationId, tenantId, customerId, reservedServices, projectedValue, finalValue,
                 pendingBalance, creditBalance, ReservationStatus.EN_EJECUCION, paymentStatus, paymentMethod,
                 createdAt, pendingTransferAmount, transferSupportReference, null, null, null, null, null, null,
-                null, null, null, null);
+                null, null, null, null, holderDocument, companions);
     }
 
     /**
@@ -275,7 +322,7 @@ public final class Reservation {
         return new Reservation(reservationId, tenantId, customerId, reservedServices, projectedValue, finalValue,
                 pendingBalance, newCreditBalance, ReservationStatus.CANCELADA, newPaymentStatus, paymentMethod,
                 createdAt, pendingTransferAmount, transferSupportReference, reason, actorId, Instant.now(),
-                null, null, null, null, null, null, null);
+                null, null, null, null, null, null, null, holderDocument, companions);
     }
 
     /**
@@ -310,7 +357,8 @@ public final class Reservation {
         return new Reservation(reservationId, tenantId, customerId, reservedServices, projectedValue, finalValue,
                 pendingBalance, newCreditBalance, reservationStatus, PaymentStatus.DEVUELTO_PARCIAL_O_TOTAL,
                 paymentMethod, createdAt, pendingTransferAmount, transferSupportReference, cancellationReason,
-                cancelledBy, cancelledAt, amount, reason, actorId, method, Instant.now(), finalizedBy, finalizedAt);
+                cancelledBy, cancelledAt, amount, reason, actorId, method, Instant.now(), finalizedBy, finalizedAt,
+                holderDocument, companions);
     }
 
     /**
@@ -330,7 +378,7 @@ public final class Reservation {
         return new Reservation(reservationId, tenantId, customerId, reservedServices, projectedValue, finalValue,
                 pendingBalance, creditBalance, ReservationStatus.FINALIZADA, paymentStatus, paymentMethod,
                 createdAt, pendingTransferAmount, transferSupportReference, null, null, null, null, null, null,
-                null, null, actorId, Instant.now());
+                null, null, actorId, Instant.now(), holderDocument, companions);
     }
 
     private void validatePaymentAmount(BigDecimal amount) {
@@ -433,5 +481,13 @@ public final class Reservation {
 
     public Instant finalizedAt() {
         return finalizedAt;
+    }
+
+    public String holderDocument() {
+        return holderDocument;
+    }
+
+    public List<Companion> companions() {
+        return companions;
     }
 }

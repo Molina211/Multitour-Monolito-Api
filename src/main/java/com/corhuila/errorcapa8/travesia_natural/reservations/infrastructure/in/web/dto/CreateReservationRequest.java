@@ -4,5 +4,7 @@ import java.math.BigDecimal;
 import java.util.List;
 
 public record CreateReservationRequest(BigDecimal projectedValue,
-                                        List<ReservedServiceRequest> reservedServices) {
+                                        List<ReservedServiceRequest> reservedServices,
+                                        String holderDocument,
+                                        List<CompanionRequest> companions) {
 }

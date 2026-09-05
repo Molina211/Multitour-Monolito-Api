@@ -15,7 +15,8 @@ public record ReservationResponse(UUID reservationId, String tenantId, String cu
                                    String transferSupportReference, String cancellationReason, String cancelledBy,
                                    Instant cancelledAt, BigDecimal refundedAmount, String refundReason,
                                    String refundedBy, String refundMethod, Instant refundedAt, String finalizedBy,
-                                   Instant finalizedAt) {
+                                   Instant finalizedAt, String holderDocument,
+                                   List<CompanionResponse> companions) {
 
     public static ReservationResponse from(Reservation reservation) {
         return new ReservationResponse(
@@ -42,6 +43,8 @@ public record ReservationResponse(UUID reservationId, String tenantId, String cu
                 reservation.refundMethod(),
                 reservation.refundedAt(),
                 reservation.finalizedBy(),
-                reservation.finalizedAt());
+                reservation.finalizedAt(),
+                reservation.holderDocument(),
+                reservation.companions().stream().map(CompanionResponse::from).toList());
     }
 }
