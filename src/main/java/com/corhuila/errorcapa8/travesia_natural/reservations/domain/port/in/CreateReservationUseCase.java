@@ -1,8 +1,0 @@
-package com.corhuila.errorcapa8.travesia_natural.reservations.domain.port.in;
-
-import com.corhuila.errorcapa8.travesia_natural.reservations.domain.model.Reservation;
-
-public interface CreateReservationUseCase {
-
-    Reservation createReservation(CreateReservationCommand command);
-}
