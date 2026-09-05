@@ -2271,3 +2271,120 @@ sin migraciones nuevas) antes de levantar la app. Los 8 pasos de `curl` de esta
 sección (listado propio, lista vacía, 401 sin token, 404 sobre reserva ajena, 403
 tenant_mismatch, y la regresión del listado público sin filtrar) devolvieron los
 códigos HTTP y payloads exactos documentados arriba.
+
+## Spec 017 — Finalización de la ejecución de una reserva
+
+Corresponde a `specs/017-reservation-execution-finalization/`. Agrega
+`POST .../reservations/{reservationId}/finalize`, que cierra operativamente una
+reserva `En ejecucion` (transición a `Finalizada`) y extiende
+`GET .../reservations/{reservationId}/execution` con `finalized`/`finalizedBy`/
+`finalizedAt`. Requiere Postgres arriba, la app corriendo, el tenant
+`travesia-natural` `Activo`, y un token válido de `laura.gomez@example.com`
+(sección "007", pasos 1-2) para crear reservas nuevas.
+
+```bash
+TOKEN="<accessToken de la sección 007, paso 1>"
+```
+
+### 1. Compilación y tests
+
+```bash
+./mvnw test
+```
+
+Debe mantener `contextLoads` en verde, con la migración a versión 14 confirmada.
+
+### 2. Finalizar una reserva `En ejecucion` (`200`)
+
+Crear una reserva, pagarla en efectivo (igual que sección "009", paso 1) y
+registrar su ejecución (igual que sección "010", paso 1) para obtener `RES_Q` en
+estado `En ejecucion`:
+
+```bash
+curl -s -X POST http://localhost:8080/api/tenants/travesia-natural/reservations \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer ${TOKEN}" \
+  -d '{ "projectedValue": 300000, "reservedServices": [{ "serviceReference": "tour-laguna-verde" }] }'
+
+curl -i -X POST http://localhost:8080/api/tenants/travesia-natural/reservations/${RES_Q}/payments \
+  -H "Content-Type: application/json" \
+  -d '{ "method": "EFECTIVO", "amount": 300000 }'
+
+curl -i -X POST http://localhost:8080/api/tenants/travesia-natural/reservations/${RES_Q}/execution \
+  -H "Content-Type: application/json" \
+  -d '{ "served": true, "executed": 4, "actorId": "guia-1" }'
+```
+
+Y finalizarla:
+
+```bash
+curl -i -X POST http://localhost:8080/api/tenants/travesia-natural/reservations/${RES_Q}/finalize \
+  -H "Content-Type: application/json" \
+  -d '{ "actorId": "guia-1" }'
+```
+
+Se espera `200 OK` con `reservationStatus: "Finalizada"`, `finalizedBy: "guia-1"` y
+`finalizedAt` presente.
+
+### 3. Doble finalización (`409`)
+
+Repetir el mismo `curl` del paso 2 sobre `RES_Q` (ya finalizada):
+
+```bash
+curl -i -X POST http://localhost:8080/api/tenants/travesia-natural/reservations/${RES_Q}/finalize \
+  -H "Content-Type: application/json" \
+  -d '{ "actorId": "guia-1" }'
+```
+
+Se espera `409 Conflict` con `{"error":"reservation_not_finalizable", ...}`.
+
+### 4. Finalizar sobre un estado que no es `En ejecucion` (`409`)
+
+Crear `RES_R` sin ejecutarla (queda `Confirmada` tras pagarla, igual que
+sección "009", paso 1):
+
+```bash
+curl -i -X POST http://localhost:8080/api/tenants/travesia-natural/reservations/${RES_R}/finalize \
+  -H "Content-Type: application/json" \
+  -d '{ "actorId": "guia-1" }'
+```
+
+Se espera `409 Conflict` con `{"error":"reservation_not_finalizable", ...}`, y la
+reserva sigue `Confirmada` sin cambios.
+
+### 5. `GET .../execution` refleja la finalización (`200`)
+
+```bash
+curl -s http://localhost:8080/api/tenants/travesia-natural/reservations/${RES_Q}/execution
+```
+
+Se espera `200 OK` con `finalized: true`, `finalizedBy: "guia-1"` y `finalizedAt`
+presente, además de los campos ya existentes (`served`, `executed`, `causal`,
+`actorId`, `recordedAt`). Repetir sobre una reserva `En ejecucion` sin finalizar
+(ej. `RES_G` de la sección "010" si sigue disponible): se espera `finalized: false`,
+`finalizedBy: null`, `finalizedAt: null`.
+
+### 6. Tenant inexistente (`404`) y tenant `Inactivo` (`409`)
+
+```bash
+curl -i -X POST http://localhost:8080/api/tenants/no-existe/reservations/${RES_Q}/finalize \
+  -H "Content-Type: application/json" \
+  -d '{ "actorId": "guia-1" }'
+```
+
+Se espera `404 Not Found` con `{"error":"not_found", ...}`. Desactivar el tenant
+(sección "002") y repetir la finalización: se espera `409 Conflict` con
+`{"error":"tenant_inactive", ...}`.
+
+Ejecutado el 2026-09-05 contra la base de desarrollo local (mismo Postgres
+`multitour-postgres`, tenant `travesia-natural`, cliente `laura.gomez@example.com`
+existente). `./mvnw test` en verde (`contextLoads`, migración a versión 14
+confirmada) antes de levantar la app. Los 6 pasos de `curl` de esta sección
+(finalización exitosa con `finalizedBy`/`finalizedAt`, doble finalización `409`,
+finalización sobre `Confirmada` `409`, `GET .../execution` reflejando
+`finalized`/`finalizedBy`/`finalizedAt`, tenant inexistente `404` y tenant
+`Inactivo` `409`, reactivando el tenant al final para no dejar el ambiente
+alterado) devolvieron los códigos HTTP y payloads exactos documentados arriba. El
+tercer criterio de aceptación de `spec.md` (finalizar sin `Execution` registrada)
+no se probó en runtime: no existe forma de llegar a ese estado por el flujo
+normal, por la garantía de atomicidad documentada en `plan.md`.

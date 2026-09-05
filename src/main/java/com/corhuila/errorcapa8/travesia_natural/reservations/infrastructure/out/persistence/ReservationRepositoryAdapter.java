@@ -58,7 +58,9 @@ public class ReservationRepositoryAdapter implements ReservationRepositoryPort {
                 reservation.refundReason(),
                 reservation.refundedBy(),
                 reservation.refundMethod(),
-                reservation.refundedAt());
+                reservation.refundedAt(),
+                reservation.finalizedBy(),
+                reservation.finalizedAt());
 
         return entity;
     }
@@ -85,7 +87,9 @@ public class ReservationRepositoryAdapter implements ReservationRepositoryPort {
                 reservation.refundReason(),
                 reservation.refundedBy(),
                 reservation.refundMethod(),
-                reservation.refundedAt());
+                reservation.refundedAt(),
+                reservation.finalizedBy(),
+                reservation.finalizedAt());
 
         for (ReservedService reservedService : reservation.reservedServices()) {
             entity.addReservedService(new ReservedServiceEntity(
@@ -148,6 +152,8 @@ public class ReservationRepositoryAdapter implements ReservationRepositoryPort {
                 entity.getRefundReason(),
                 entity.getRefundedBy(),
                 entity.getRefundMethod(),
-                entity.getRefundedAt());
+                entity.getRefundedAt(),
+                entity.getFinalizedBy(),
+                entity.getFinalizedAt());
     }
 }

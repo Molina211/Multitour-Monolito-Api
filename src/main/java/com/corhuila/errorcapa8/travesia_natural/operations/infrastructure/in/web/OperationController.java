@@ -17,6 +17,7 @@ import com.corhuila.errorcapa8.travesia_natural.operations.infrastructure.in.web
 import com.corhuila.errorcapa8.travesia_natural.operations.infrastructure.in.web.dto.RegisterOperationCostRequest;
 import com.corhuila.errorcapa8.travesia_natural.reservations.domain.exception.ReservationNotExecutableException;
 import com.corhuila.errorcapa8.travesia_natural.reservations.domain.exception.ReservationNotFoundException;
+import com.corhuila.errorcapa8.travesia_natural.reservations.domain.model.Reservation;
 import com.corhuila.errorcapa8.travesia_natural.reservations.domain.port.in.ReservationQueryUseCase;
 import com.corhuila.errorcapa8.travesia_natural.reservations.infrastructure.in.web.dto.ReservationResponse;
 import com.corhuila.errorcapa8.travesia_natural.tenants.domain.exception.TenantInactiveException;
@@ -76,8 +77,9 @@ public class OperationController {
     public ResponseEntity<ExecutionResponse> getExecution(@PathVariable String tenantId,
                                                             @PathVariable UUID reservationId) {
         Execution execution = executionQueryUseCase.getByReservation(tenantId, reservationId);
+        Reservation reservation = reservationQueryUseCase.getById(tenantId, reservationId);
 
-        return ResponseEntity.ok(ExecutionResponse.from(execution));
+        return ResponseEntity.ok(ExecutionResponse.from(execution, reservation));
     }
 
     @GetMapping("/pending-execution")
