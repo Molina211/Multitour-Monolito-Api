@@ -24,15 +24,20 @@ public class TenantEntity {
     @Column(name = "created_at", nullable = false)
     private Instant createdAt;
 
+    @Column(name = "allow_collaborator_support_validation", nullable = false)
+    private boolean allowCollaboratorSupportValidation;
+
     protected TenantEntity() {
         // JPA
     }
 
-    public TenantEntity(String tenantId, String commercialName, String tenantStatus, Instant createdAt) {
+    public TenantEntity(String tenantId, String commercialName, String tenantStatus, Instant createdAt,
+                         boolean allowCollaboratorSupportValidation) {
         this.tenantId = tenantId;
         this.commercialName = commercialName;
         this.tenantStatus = tenantStatus;
         this.createdAt = createdAt;
+        this.allowCollaboratorSupportValidation = allowCollaboratorSupportValidation;
     }
 
     public String getTenantId() {
@@ -49,5 +54,9 @@ public class TenantEntity {
 
     public Instant getCreatedAt() {
         return createdAt;
+    }
+
+    public boolean isAllowCollaboratorSupportValidation() {
+        return allowCollaboratorSupportValidation;
     }
 }

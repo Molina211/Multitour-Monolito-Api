@@ -35,7 +35,7 @@ public class DeactivateTenantService implements DeactivateTenantUseCase {
 
         auditRecorder.record(AuditRecord.of(
                 deactivated.tenantId(), command.actorId(), "TENANT_DEACTIVATED", deactivated.tenantId(),
-                command.reason()));
+                command.reason(), "Activo", "Inactivo", "tenants", "Cambio de estado de operador"));
 
         return deactivated;
     }

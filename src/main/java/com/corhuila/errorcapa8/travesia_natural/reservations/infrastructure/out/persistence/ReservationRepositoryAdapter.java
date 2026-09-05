@@ -1,6 +1,8 @@
 package com.corhuila.errorcapa8.travesia_natural.reservations.infrastructure.out.persistence;
 
+import com.corhuila.errorcapa8.travesia_natural.reservations.domain.model.Companion;
 import com.corhuila.errorcapa8.travesia_natural.reservations.domain.model.PaymentStatus;
+import com.corhuila.errorcapa8.travesia_natural.reservations.domain.model.RefundDecisionStatus;
 import com.corhuila.errorcapa8.travesia_natural.reservations.domain.model.Reservation;
 import com.corhuila.errorcapa8.travesia_natural.reservations.domain.model.ReservationStatus;
 import com.corhuila.errorcapa8.travesia_natural.reservations.domain.model.ReservedService;
@@ -22,12 +24,16 @@ public class ReservationRepositoryAdapter implements ReservationRepositoryPort {
     }
 
     /**
-     * {@code reservedServices} se fija una sola vez al crear la reserva y ningún método de
-     * dominio lo modifica después (pagar/cancelar/devolver solo cambian campos escalares):
-     * si la reserva ya existe, se actualizan esos campos y no se toca la colección de
-     * servicios (antes: se reconstruía el agregado completo en cada guardado, y
-     * `orphanRemoval` borraba y reinsertaba los servicios reservados en cada pago o
-     * cancelación, aunque no hubieran cambiado).
+     * {@code reservedServices} se fija una sola vez al crear la reserva y por defecto
+     * ningún método de dominio lo modifica después (pagar/cancelar/devolver solo cambian
+     * campos escalares): si la reserva ya existe, se actualizan esos campos y no se toca
+     * la colección de servicios (antes: se reconstruía el agregado completo en cada
+     * guardado, y `orphanRemoval` borraba y reinsertaba los servicios reservados en cada
+     * pago o cancelación, aunque no hubieran cambiado). La única excepción es la
+     * modificación explícita de una reserva (spec 022): se detecta comparando
+     * estructuralmente {@code reservation.reservedServices()} contra los ya persistidos
+     * (son {@code record}, ya traen {@code equals()}) y, solo si difieren, se reemplaza
+     * la colección.
      */
     @Override
     @Transactional
@@ -43,6 +49,7 @@ public class ReservationRepositoryAdapter implements ReservationRepositoryPort {
 
     private static ReservationEntity applyChanges(ReservationEntity entity, Reservation reservation) {
         entity.updateState(
+                reservation.projectedValue(),
                 reservation.finalValue(),
                 reservation.pendingBalance(),
                 reservation.creditBalance(),
@@ -54,11 +61,35 @@ public class ReservationRepositoryAdapter implements ReservationRepositoryPort {
                 reservation.cancellationReason(),
                 reservation.cancelledBy(),
                 reservation.cancelledAt(),
+                reservation.refundDecisionStatus() == null ? null : reservation.refundDecisionStatus().label(),
+                reservation.refundAuthorizedBy(),
+                reservation.refundAuthorizedAt(),
+                reservation.refundAuthorizationNote(),
+                reservation.refundRejectedBy(),
+                reservation.refundRejectedAt(),
+                reservation.refundRejectionReason(),
                 reservation.refundedAmount(),
                 reservation.refundReason(),
                 reservation.refundedBy(),
                 reservation.refundMethod(),
-                reservation.refundedAt());
+                reservation.refundedAt(),
+                reservation.finalizedBy(),
+                reservation.finalizedAt(),
+                reservation.modificationReason(),
+                reservation.modifiedBy(),
+                reservation.modifiedAt());
+
+        List<ReservedService> currentReservedServices = entity.getReservedServices().stream()
+                .map(rs -> new ReservedService(rs.getServiceReference(), rs.getPartySize(), rs.getScheduledDate(),
+                        rs.getTransportItemId(), rs.getTransportCost()))
+                .toList();
+        if (!currentReservedServices.equals(reservation.reservedServices())) {
+            entity.replaceReservedServices(reservation.reservedServices().stream()
+                    .map(rs -> new ReservedServiceEntity(
+                            reservation.tenantId(), rs.serviceReference(), rs.partySize(), rs.scheduledDate(),
+                            rs.transportItemId(), rs.transportCost()))
+                    .toList());
+        }
 
         return entity;
     }
@@ -81,18 +112,41 @@ public class ReservationRepositoryAdapter implements ReservationRepositoryPort {
                 reservation.cancellationReason(),
                 reservation.cancelledBy(),
                 reservation.cancelledAt(),
+                reservation.refundDecisionStatus() == null ? null : reservation.refundDecisionStatus().label(),
+                reservation.refundAuthorizedBy(),
+                reservation.refundAuthorizedAt(),
+                reservation.refundAuthorizationNote(),
+                reservation.refundRejectedBy(),
+                reservation.refundRejectedAt(),
+                reservation.refundRejectionReason(),
                 reservation.refundedAmount(),
                 reservation.refundReason(),
                 reservation.refundedBy(),
                 reservation.refundMethod(),
-                reservation.refundedAt());
+                reservation.refundedAt(),
+                reservation.finalizedBy(),
+                reservation.finalizedAt(),
+                reservation.modificationReason(),
+                reservation.modifiedBy(),
+                reservation.modifiedAt(),
+                reservation.holderDocument());
 
         for (ReservedService reservedService : reservation.reservedServices()) {
             entity.addReservedService(new ReservedServiceEntity(
                     reservation.tenantId(),
                     reservedService.serviceReference(),
                     reservedService.partySize(),
-                    reservedService.scheduledDate()));
+                    reservedService.scheduledDate(),
+                    reservedService.transportItemId(),
+                    reservedService.transportCost()));
+        }
+
+        for (Companion companion : reservation.companions()) {
+            entity.addCompanion(new CompanionEntity(
+                    reservation.tenantId(),
+                    companion.name(),
+                    companion.document(),
+                    companion.birthDate()));
         }
 
         return entity;
@@ -123,7 +177,12 @@ public class ReservationRepositoryAdapter implements ReservationRepositoryPort {
 
     private static Reservation toDomain(ReservationEntity entity) {
         List<ReservedService> reservedServices = entity.getReservedServices().stream()
-                .map(rs -> new ReservedService(rs.getServiceReference(), rs.getPartySize(), rs.getScheduledDate()))
+                .map(rs -> new ReservedService(rs.getServiceReference(), rs.getPartySize(), rs.getScheduledDate(),
+                        rs.getTransportItemId(), rs.getTransportCost()))
+                .toList();
+
+        List<Companion> companions = entity.getCompanions().stream()
+                .map(c -> new Companion(c.getName(), c.getDocument(), c.getBirthDate()))
                 .toList();
 
         return Reservation.reconstitute(
@@ -144,10 +203,24 @@ public class ReservationRepositoryAdapter implements ReservationRepositoryPort {
                 entity.getCancellationReason(),
                 entity.getCancelledBy(),
                 entity.getCancelledAt(),
+                entity.getRefundDecisionStatus() == null ? null : RefundDecisionStatus.fromLabel(entity.getRefundDecisionStatus()),
+                entity.getRefundAuthorizedBy(),
+                entity.getRefundAuthorizedAt(),
+                entity.getRefundAuthorizationNote(),
+                entity.getRefundRejectedBy(),
+                entity.getRefundRejectedAt(),
+                entity.getRefundRejectionReason(),
                 entity.getRefundedAmount(),
                 entity.getRefundReason(),
                 entity.getRefundedBy(),
                 entity.getRefundMethod(),
-                entity.getRefundedAt());
+                entity.getRefundedAt(),
+                entity.getFinalizedBy(),
+                entity.getFinalizedAt(),
+                entity.getModificationReason(),
+                entity.getModifiedBy(),
+                entity.getModifiedAt(),
+                entity.getHolderDocument(),
+                companions);
     }
 }

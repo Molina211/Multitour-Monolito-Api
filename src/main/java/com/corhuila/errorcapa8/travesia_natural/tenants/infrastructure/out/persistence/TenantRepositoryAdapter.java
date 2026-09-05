@@ -23,7 +23,8 @@ public class TenantRepositoryAdapter implements TenantRepositoryPort {
                 tenant.tenantId(),
                 tenant.commercialName(),
                 tenant.tenantStatus().name(),
-                tenant.createdAt()));
+                tenant.createdAt(),
+                tenant.allowCollaboratorSupportValidation()));
 
         return tenant;
     }
@@ -48,6 +49,7 @@ public class TenantRepositoryAdapter implements TenantRepositoryPort {
                 entity.getTenantId(),
                 entity.getCommercialName(),
                 TenantStatus.valueOf(entity.getTenantStatus()),
-                entity.getCreatedAt());
+                entity.getCreatedAt(),
+                entity.isAllowCollaboratorSupportValidation());
     }
 }

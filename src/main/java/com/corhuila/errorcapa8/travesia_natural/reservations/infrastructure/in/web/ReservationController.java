@@ -2,23 +2,48 @@ package com.corhuila.errorcapa8.travesia_natural.reservations.infrastructure.in.
 
 import com.corhuila.errorcapa8.travesia_natural.common.security.JwtPrincipal;
 import com.corhuila.errorcapa8.travesia_natural.reservations.domain.exception.InvalidReservationException;
+import com.corhuila.errorcapa8.travesia_natural.reservations.domain.exception.RefundActionNotAllowedException;
+import com.corhuila.errorcapa8.travesia_natural.reservations.domain.exception.RefundNotAuthorizedException;
 import com.corhuila.errorcapa8.travesia_natural.reservations.domain.exception.ReservationNotCancellableException;
+import com.corhuila.errorcapa8.travesia_natural.reservations.domain.exception.ReservationNotDiscountableException;
+import com.corhuila.errorcapa8.travesia_natural.reservations.domain.exception.ReservationNotFinalizableException;
 import com.corhuila.errorcapa8.travesia_natural.reservations.domain.exception.ReservationNotFoundException;
+import com.corhuila.errorcapa8.travesia_natural.reservations.domain.exception.ReservationNotModifiableException;
 import com.corhuila.errorcapa8.travesia_natural.reservations.domain.exception.ReservationNotRefundableException;
 import com.corhuila.errorcapa8.travesia_natural.reservations.domain.exception.TenantMismatchException;
+import com.corhuila.errorcapa8.travesia_natural.reservations.domain.model.Companion;
 import com.corhuila.errorcapa8.travesia_natural.reservations.domain.model.Reservation;
 import com.corhuila.errorcapa8.travesia_natural.reservations.domain.model.ReservedService;
+import com.corhuila.errorcapa8.travesia_natural.reservations.domain.port.in.ApplyDiscountCommand;
+import com.corhuila.errorcapa8.travesia_natural.reservations.domain.port.in.ApplyDiscountUseCase;
+import com.corhuila.errorcapa8.travesia_natural.reservations.domain.port.in.AuthorizeRefundCommand;
+import com.corhuila.errorcapa8.travesia_natural.reservations.domain.port.in.AuthorizeRefundUseCase;
 import com.corhuila.errorcapa8.travesia_natural.reservations.domain.port.in.CancelReservationCommand;
 import com.corhuila.errorcapa8.travesia_natural.reservations.domain.port.in.CancelReservationUseCase;
 import com.corhuila.errorcapa8.travesia_natural.reservations.domain.port.in.CreateReservationCommand;
 import com.corhuila.errorcapa8.travesia_natural.reservations.domain.port.in.CreateReservationUseCase;
+import com.corhuila.errorcapa8.travesia_natural.reservations.domain.port.in.FinalizeReservationCommand;
+import com.corhuila.errorcapa8.travesia_natural.reservations.domain.port.in.FinalizeReservationUseCase;
+import com.corhuila.errorcapa8.travesia_natural.reservations.domain.port.in.ModifyReservationCommand;
+import com.corhuila.errorcapa8.travesia_natural.reservations.domain.port.in.ModifyReservationUseCase;
 import com.corhuila.errorcapa8.travesia_natural.reservations.domain.port.in.RefundReservationCommand;
 import com.corhuila.errorcapa8.travesia_natural.reservations.domain.port.in.RefundReservationUseCase;
+import com.corhuila.errorcapa8.travesia_natural.reservations.domain.port.in.RegisterRefundAsCreditBalanceCommand;
+import com.corhuila.errorcapa8.travesia_natural.reservations.domain.port.in.RegisterRefundAsCreditBalanceUseCase;
+import com.corhuila.errorcapa8.travesia_natural.reservations.domain.port.in.RejectRefundCommand;
+import com.corhuila.errorcapa8.travesia_natural.reservations.domain.port.in.RejectRefundUseCase;
 import com.corhuila.errorcapa8.travesia_natural.reservations.domain.port.in.ReservationQueryUseCase;
 import com.corhuila.errorcapa8.travesia_natural.common.web.dto.ErrorResponse;
+import com.corhuila.errorcapa8.travesia_natural.reservations.infrastructure.in.web.dto.ApplyDiscountRequest;
+import com.corhuila.errorcapa8.travesia_natural.reservations.infrastructure.in.web.dto.AuthorizeRefundRequest;
 import com.corhuila.errorcapa8.travesia_natural.reservations.infrastructure.in.web.dto.CancelReservationRequest;
+import com.corhuila.errorcapa8.travesia_natural.reservations.infrastructure.in.web.dto.CompanionRequest;
 import com.corhuila.errorcapa8.travesia_natural.reservations.infrastructure.in.web.dto.CreateReservationRequest;
+import com.corhuila.errorcapa8.travesia_natural.reservations.infrastructure.in.web.dto.FinalizeReservationRequest;
+import com.corhuila.errorcapa8.travesia_natural.reservations.infrastructure.in.web.dto.ModifyReservationRequest;
 import com.corhuila.errorcapa8.travesia_natural.reservations.infrastructure.in.web.dto.RefundReservationRequest;
+import com.corhuila.errorcapa8.travesia_natural.reservations.infrastructure.in.web.dto.RegisterRefundAsCreditBalanceRequest;
+import com.corhuila.errorcapa8.travesia_natural.reservations.infrastructure.in.web.dto.RejectRefundRequest;
 import com.corhuila.errorcapa8.travesia_natural.reservations.infrastructure.in.web.dto.ReservationResponse;
 import com.corhuila.errorcapa8.travesia_natural.reservations.infrastructure.in.web.dto.ReservedServiceRequest;
 import com.corhuila.errorcapa8.travesia_natural.tenants.domain.exception.TenantInactiveException;
@@ -66,16 +91,34 @@ public class ReservationController {
     private final CreateReservationUseCase createReservationUseCase;
     private final ReservationQueryUseCase reservationQueryUseCase;
     private final CancelReservationUseCase cancelReservationUseCase;
+    private final ModifyReservationUseCase modifyReservationUseCase;
+    private final ApplyDiscountUseCase applyDiscountUseCase;
     private final RefundReservationUseCase refundReservationUseCase;
+    private final FinalizeReservationUseCase finalizeReservationUseCase;
+    private final AuthorizeRefundUseCase authorizeRefundUseCase;
+    private final RejectRefundUseCase rejectRefundUseCase;
+    private final RegisterRefundAsCreditBalanceUseCase registerRefundAsCreditBalanceUseCase;
 
     public ReservationController(CreateReservationUseCase createReservationUseCase,
                                   ReservationQueryUseCase reservationQueryUseCase,
                                   CancelReservationUseCase cancelReservationUseCase,
-                                  RefundReservationUseCase refundReservationUseCase) {
+                                  ModifyReservationUseCase modifyReservationUseCase,
+                                  ApplyDiscountUseCase applyDiscountUseCase,
+                                  RefundReservationUseCase refundReservationUseCase,
+                                  FinalizeReservationUseCase finalizeReservationUseCase,
+                                  AuthorizeRefundUseCase authorizeRefundUseCase,
+                                  RejectRefundUseCase rejectRefundUseCase,
+                                  RegisterRefundAsCreditBalanceUseCase registerRefundAsCreditBalanceUseCase) {
         this.createReservationUseCase = createReservationUseCase;
         this.reservationQueryUseCase = reservationQueryUseCase;
         this.cancelReservationUseCase = cancelReservationUseCase;
+        this.modifyReservationUseCase = modifyReservationUseCase;
+        this.applyDiscountUseCase = applyDiscountUseCase;
         this.refundReservationUseCase = refundReservationUseCase;
+        this.finalizeReservationUseCase = finalizeReservationUseCase;
+        this.authorizeRefundUseCase = authorizeRefundUseCase;
+        this.rejectRefundUseCase = rejectRefundUseCase;
+        this.registerRefundAsCreditBalanceUseCase = registerRefundAsCreditBalanceUseCase;
     }
 
     @PostMapping
@@ -88,9 +131,11 @@ public class ReservationController {
         }
 
         List<ReservedService> reservedServices = toDomainReservedServices(request.reservedServices());
+        List<Companion> companions = toDomainCompanions(request.companions());
 
         CreateReservationCommand command = new CreateReservationCommand(
-                tenantId, principal.membershipId(), request.projectedValue(), reservedServices);
+                tenantId, principal.membershipId(), request.projectedValue(), reservedServices,
+                request.holderDocument(), companions);
 
         Reservation reservation = createReservationUseCase.createReservation(command);
 
@@ -155,6 +200,33 @@ public class ReservationController {
         return ResponseEntity.ok(ReservationResponse.from(reservation));
     }
 
+    @PostMapping("/{reservationId}/modify")
+    public ResponseEntity<ReservationResponse> modify(@PathVariable String tenantId,
+                                                          @PathVariable UUID reservationId,
+                                                          @RequestBody ModifyReservationRequest request) {
+        List<ReservedService> reservedServices = toDomainReservedServices(request.reservedServices());
+
+        ModifyReservationCommand command = new ModifyReservationCommand(
+                tenantId, reservationId, reservedServices, request.projectedValue(), request.finalValue(),
+                request.reason(), request.actorId());
+
+        Reservation reservation = modifyReservationUseCase.modifyReservation(command);
+
+        return ResponseEntity.ok(ReservationResponse.from(reservation));
+    }
+
+    @PostMapping("/{reservationId}/apply-discount")
+    public ResponseEntity<ReservationResponse> applyDiscount(@PathVariable String tenantId,
+                                                               @PathVariable UUID reservationId,
+                                                               @RequestBody ApplyDiscountRequest request) {
+        ApplyDiscountCommand command = new ApplyDiscountCommand(
+                tenantId, reservationId, request.percentage(), request.reason(), request.actorId());
+
+        Reservation reservation = applyDiscountUseCase.applyDiscount(command);
+
+        return ResponseEntity.ok(ReservationResponse.from(reservation));
+    }
+
     @PostMapping("/{reservationId}/refund")
     public ResponseEntity<ReservationResponse> refund(@PathVariable String tenantId,
                                                          @PathVariable UUID reservationId,
@@ -167,12 +239,70 @@ public class ReservationController {
         return ResponseEntity.ok(ReservationResponse.from(reservation));
     }
 
+    @PostMapping("/{reservationId}/refund/authorize")
+    public ResponseEntity<ReservationResponse> authorizeRefund(@PathVariable String tenantId,
+                                                                  @PathVariable UUID reservationId,
+                                                                  @RequestBody AuthorizeRefundRequest request) {
+        AuthorizeRefundCommand command = new AuthorizeRefundCommand(
+                tenantId, reservationId, request.actorId(), request.note());
+
+        Reservation reservation = authorizeRefundUseCase.authorizeRefund(command);
+
+        return ResponseEntity.ok(ReservationResponse.from(reservation));
+    }
+
+    @PostMapping("/{reservationId}/refund/reject")
+    public ResponseEntity<ReservationResponse> rejectRefund(@PathVariable String tenantId,
+                                                                @PathVariable UUID reservationId,
+                                                                @RequestBody RejectRefundRequest request) {
+        RejectRefundCommand command = new RejectRefundCommand(
+                tenantId, reservationId, request.actorId(), request.reason());
+
+        Reservation reservation = rejectRefundUseCase.rejectRefund(command);
+
+        return ResponseEntity.ok(ReservationResponse.from(reservation));
+    }
+
+    @PostMapping("/{reservationId}/refund/credit-balance")
+    public ResponseEntity<ReservationResponse> registerRefundAsCreditBalance(
+            @PathVariable String tenantId, @PathVariable UUID reservationId,
+            @RequestBody RegisterRefundAsCreditBalanceRequest request) {
+        RegisterRefundAsCreditBalanceCommand command = new RegisterRefundAsCreditBalanceCommand(
+                tenantId, reservationId, request.actorId());
+
+        Reservation reservation = registerRefundAsCreditBalanceUseCase.registerRefundAsCreditBalance(command);
+
+        return ResponseEntity.ok(ReservationResponse.from(reservation));
+    }
+
+    @PostMapping("/{reservationId}/finalize")
+    public ResponseEntity<ReservationResponse> finalize(@PathVariable String tenantId,
+                                                           @PathVariable UUID reservationId,
+                                                           @RequestBody FinalizeReservationRequest request) {
+        FinalizeReservationCommand command = new FinalizeReservationCommand(
+                tenantId, reservationId, request.actorId());
+
+        Reservation reservation = finalizeReservationUseCase.finalizeReservation(command);
+
+        return ResponseEntity.ok(ReservationResponse.from(reservation));
+    }
+
     private List<ReservedService> toDomainReservedServices(List<ReservedServiceRequest> requests) {
         if (requests == null) {
             return List.of();
         }
         return requests.stream()
-                .map(r -> new ReservedService(r.serviceReference(), r.partySize(), r.scheduledDate()))
+                .map(r -> new ReservedService(r.serviceReference(), r.partySize(), r.scheduledDate(),
+                        r.transportItemId(), null))
+                .toList();
+    }
+
+    private List<Companion> toDomainCompanions(List<CompanionRequest> requests) {
+        if (requests == null) {
+            return List.of();
+        }
+        return requests.stream()
+                .map(r -> new Companion(r.name(), r.document(), r.birthDate()))
                 .toList();
     }
 
@@ -202,9 +332,39 @@ public class ReservationController {
                 .body(new ErrorResponse("reservation_not_cancellable", ex.getMessage()));
     }
 
+    @ExceptionHandler(ReservationNotModifiableException.class)
+    public ResponseEntity<ErrorResponse> handleReservationNotModifiable(ReservationNotModifiableException ex) {
+        return ResponseEntity.status(HttpStatus.CONFLICT)
+                .body(new ErrorResponse("reservation_not_modifiable", ex.getMessage()));
+    }
+
+    @ExceptionHandler(ReservationNotDiscountableException.class)
+    public ResponseEntity<ErrorResponse> handleReservationNotDiscountable(ReservationNotDiscountableException ex) {
+        return ResponseEntity.status(HttpStatus.CONFLICT)
+                .body(new ErrorResponse("reservation_not_discountable", ex.getMessage()));
+    }
+
     @ExceptionHandler(ReservationNotRefundableException.class)
     public ResponseEntity<ErrorResponse> handleReservationNotRefundable(ReservationNotRefundableException ex) {
         return ResponseEntity.status(HttpStatus.CONFLICT)
                 .body(new ErrorResponse("reservation_not_refundable", ex.getMessage()));
+    }
+
+    @ExceptionHandler(RefundNotAuthorizedException.class)
+    public ResponseEntity<ErrorResponse> handleRefundNotAuthorized(RefundNotAuthorizedException ex) {
+        return ResponseEntity.status(HttpStatus.CONFLICT)
+                .body(new ErrorResponse("refund_not_authorized", ex.getMessage()));
+    }
+
+    @ExceptionHandler(RefundActionNotAllowedException.class)
+    public ResponseEntity<ErrorResponse> handleRefundActionNotAllowed(RefundActionNotAllowedException ex) {
+        return ResponseEntity.status(HttpStatus.FORBIDDEN)
+                .body(new ErrorResponse("refund_action_not_allowed", ex.getMessage()));
+    }
+
+    @ExceptionHandler(ReservationNotFinalizableException.class)
+    public ResponseEntity<ErrorResponse> handleReservationNotFinalizable(ReservationNotFinalizableException ex) {
+        return ResponseEntity.status(HttpStatus.CONFLICT)
+                .body(new ErrorResponse("reservation_not_finalizable", ex.getMessage()));
     }
 }

@@ -24,7 +24,11 @@ public class AuditRecorderAdapter implements AuditRecorder {
                 auditRecord.action(),
                 auditRecord.affectedRecordId(),
                 auditRecord.reason(),
-                auditRecord.recordedAt()));
+                auditRecord.recordedAt(),
+                auditRecord.previousValue(),
+                auditRecord.newValue(),
+                auditRecord.channelOrModule(),
+                auditRecord.functionalProcessReference()));
 
         return auditRecord;
     }
@@ -42,6 +46,10 @@ public class AuditRecorderAdapter implements AuditRecorder {
                 entity.getAction(),
                 entity.getAffectedRecordId(),
                 entity.getReason(),
-                entity.getRecordedAt());
+                entity.getRecordedAt(),
+                entity.getPreviousValue(),
+                entity.getNewValue(),
+                entity.getChannelOrModule(),
+                entity.getFunctionalProcessReference());
     }
 }
