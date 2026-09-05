@@ -4,6 +4,7 @@ import com.corhuila.errorcapa8.travesia_natural.reservations.domain.exception.In
 import com.corhuila.errorcapa8.travesia_natural.reservations.domain.exception.PaymentAlreadyResolvedException;
 import com.corhuila.errorcapa8.travesia_natural.reservations.domain.exception.ReservationNotCancellableException;
 import com.corhuila.errorcapa8.travesia_natural.reservations.domain.exception.ReservationNotExecutableException;
+import com.corhuila.errorcapa8.travesia_natural.reservations.domain.exception.ReservationNotFinalizableException;
 import com.corhuila.errorcapa8.travesia_natural.reservations.domain.exception.ReservationNotRefundableException;
 
 import java.math.BigDecimal;
@@ -40,6 +41,8 @@ public final class Reservation {
     private final String refundedBy;
     private final String refundMethod;
     private final Instant refundedAt;
+    private final String finalizedBy;
+    private final Instant finalizedAt;
 
     private Reservation(UUID reservationId, String tenantId, String customerId,
                          List<ReservedService> reservedServices, BigDecimal projectedValue,
@@ -48,7 +51,8 @@ public final class Reservation {
                          String paymentMethod, Instant createdAt, BigDecimal pendingTransferAmount,
                          String transferSupportReference, String cancellationReason, String cancelledBy,
                          Instant cancelledAt, BigDecimal refundedAmount, String refundReason,
-                         String refundedBy, String refundMethod, Instant refundedAt) {
+                         String refundedBy, String refundMethod, Instant refundedAt,
+                         String finalizedBy, Instant finalizedAt) {
         this.reservationId = reservationId;
         this.tenantId = tenantId;
         this.customerId = customerId;
@@ -71,6 +75,8 @@ public final class Reservation {
         this.refundedBy = refundedBy;
         this.refundMethod = refundMethod;
         this.refundedAt = refundedAt;
+        this.finalizedBy = finalizedBy;
+        this.finalizedAt = finalizedAt;
     }
 
     /**
@@ -115,6 +121,8 @@ public final class Reservation {
                 null,
                 null,
                 null,
+                null,
+                null,
                 null);
     }
 
@@ -130,11 +138,12 @@ public final class Reservation {
                                             BigDecimal pendingTransferAmount, String transferSupportReference,
                                             String cancellationReason, String cancelledBy, Instant cancelledAt,
                                             BigDecimal refundedAmount, String refundReason, String refundedBy,
-                                            String refundMethod, Instant refundedAt) {
+                                            String refundMethod, Instant refundedAt, String finalizedBy,
+                                            Instant finalizedAt) {
         return new Reservation(reservationId, tenantId, customerId, reservedServices, projectedValue, finalValue,
                 pendingBalance, creditBalance, reservationStatus, paymentStatus, paymentMethod, createdAt,
                 pendingTransferAmount, transferSupportReference, cancellationReason, cancelledBy, cancelledAt,
-                refundedAmount, refundReason, refundedBy, refundMethod, refundedAt);
+                refundedAmount, refundReason, refundedBy, refundMethod, refundedAt, finalizedBy, finalizedAt);
     }
 
     /**
@@ -150,7 +159,7 @@ public final class Reservation {
         }
         return new Reservation(reservationId, tenantId, customerId, reservedServices, projectedValue, finalValue,
                 BigDecimal.ZERO, creditBalance, ReservationStatus.CONFIRMADA, PaymentStatus.PAGADO, "Efectivo",
-                createdAt, null, null, null, null, null, null, null, null, null, null);
+                createdAt, null, null, null, null, null, null, null, null, null, null, null, null);
     }
 
     /**
@@ -168,7 +177,7 @@ public final class Reservation {
                 newPendingBalance, creditBalance,
                 settled ? ReservationStatus.CONFIRMADA : reservationStatus,
                 settled ? PaymentStatus.PAGADO : PaymentStatus.PARCIAL,
-                "Abono", createdAt, null, null, null, null, null, null, null, null, null, null);
+                "Abono", createdAt, null, null, null, null, null, null, null, null, null, null, null, null);
     }
 
     /**
@@ -186,7 +195,7 @@ public final class Reservation {
         }
         return new Reservation(reservationId, tenantId, customerId, reservedServices, projectedValue, finalValue,
                 pendingBalance, creditBalance, reservationStatus, PaymentStatus.EN_VALIDACION, "Transferencia",
-                createdAt, amount, supportReference, null, null, null, null, null, null, null, null);
+                createdAt, amount, supportReference, null, null, null, null, null, null, null, null, null, null);
     }
 
     /**
@@ -200,7 +209,8 @@ public final class Reservation {
         }
         return new Reservation(reservationId, tenantId, customerId, reservedServices, projectedValue, finalValue,
                 pendingBalance, creditBalance, reservationStatus, paymentStatus, paymentMethod, createdAt,
-                pendingTransferAmount, transferSupportReference, null, null, null, null, null, null, null, null)
+                pendingTransferAmount, transferSupportReference, null, null, null, null, null, null, null, null,
+                null, null)
                 .registerInstallmentPayment(pendingTransferAmount);
     }
 
@@ -215,7 +225,7 @@ public final class Reservation {
         }
         return new Reservation(reservationId, tenantId, customerId, reservedServices, projectedValue, finalValue,
                 pendingBalance, creditBalance, reservationStatus, PaymentStatus.RECHAZADO, paymentMethod,
-                createdAt, null, null, null, null, null, null, null, null, null, null);
+                createdAt, null, null, null, null, null, null, null, null, null, null, null, null);
     }
 
     /**
@@ -233,7 +243,7 @@ public final class Reservation {
         return new Reservation(reservationId, tenantId, customerId, reservedServices, projectedValue, finalValue,
                 pendingBalance, creditBalance, ReservationStatus.EN_EJECUCION, paymentStatus, paymentMethod,
                 createdAt, pendingTransferAmount, transferSupportReference, null, null, null, null, null, null,
-                null, null);
+                null, null, null, null);
     }
 
     /**
@@ -265,7 +275,7 @@ public final class Reservation {
         return new Reservation(reservationId, tenantId, customerId, reservedServices, projectedValue, finalValue,
                 pendingBalance, newCreditBalance, ReservationStatus.CANCELADA, newPaymentStatus, paymentMethod,
                 createdAt, pendingTransferAmount, transferSupportReference, reason, actorId, Instant.now(),
-                null, null, null, null, null);
+                null, null, null, null, null, null, null);
     }
 
     /**
@@ -300,7 +310,27 @@ public final class Reservation {
         return new Reservation(reservationId, tenantId, customerId, reservedServices, projectedValue, finalValue,
                 pendingBalance, newCreditBalance, reservationStatus, PaymentStatus.DEVUELTO_PARCIAL_O_TOTAL,
                 paymentMethod, createdAt, pendingTransferAmount, transferSupportReference, cancellationReason,
-                cancelledBy, cancelledAt, amount, reason, actorId, method, Instant.now());
+                cancelledBy, cancelledAt, amount, reason, actorId, method, Instant.now(), finalizedBy, finalizedAt);
+    }
+
+    /**
+     * Finaliza la ejecución de la reserva (spec 017): solo permitido desde
+     * `EnEjecucion` (Sección 16 "Reserva" del PRD: "cuando termina la prestación del
+     * servicio y se cierra operativamente"). No modifica precio, descuentos, pago ni
+     * saldo — solo cierra la ejecución. El mismo guard cubre tanto "todavía no inició
+     * ejecución" como "ya se finalizó", porque tras finalizar el estado deja de ser
+     * `EnEjecucion`.
+     */
+    public Reservation finalizeExecution(String actorId) {
+        if (reservationStatus != ReservationStatus.EN_EJECUCION) {
+            throw new ReservationNotFinalizableException(
+                    "reservation must be En ejecucion to be finalized, current status: "
+                            + reservationStatus.label() + " (reservation: " + reservationId + ")");
+        }
+        return new Reservation(reservationId, tenantId, customerId, reservedServices, projectedValue, finalValue,
+                pendingBalance, creditBalance, ReservationStatus.FINALIZADA, paymentStatus, paymentMethod,
+                createdAt, pendingTransferAmount, transferSupportReference, null, null, null, null, null, null,
+                null, null, actorId, Instant.now());
     }
 
     private void validatePaymentAmount(BigDecimal amount) {
@@ -395,5 +425,13 @@ public final class Reservation {
 
     public Instant refundedAt() {
         return refundedAt;
+    }
+
+    public String finalizedBy() {
+        return finalizedBy;
+    }
+
+    public Instant finalizedAt() {
+        return finalizedAt;
     }
 }

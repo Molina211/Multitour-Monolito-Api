@@ -82,6 +82,12 @@ public class ReservationEntity {
     @Column(name = "refunded_at")
     private Instant refundedAt;
 
+    @Column(name = "finalized_by")
+    private String finalizedBy;
+
+    @Column(name = "finalized_at")
+    private Instant finalizedAt;
+
     @OneToMany(mappedBy = "reservation", cascade = CascadeType.ALL, orphanRemoval = true)
     @OrderBy("id ASC")
     private List<ReservedServiceEntity> reservedServices = new ArrayList<>();
@@ -96,7 +102,7 @@ public class ReservationEntity {
                               Instant createdAt, BigDecimal pendingTransferAmount, String transferSupportReference,
                               String cancellationReason, String cancelledBy, Instant cancelledAt,
                               BigDecimal refundedAmount, String refundReason, String refundedBy,
-                              String refundMethod, Instant refundedAt) {
+                              String refundMethod, Instant refundedAt, String finalizedBy, Instant finalizedAt) {
         this.reservationId = reservationId;
         this.tenantId = tenantId;
         this.customerId = customerId;
@@ -118,6 +124,8 @@ public class ReservationEntity {
         this.refundedBy = refundedBy;
         this.refundMethod = refundMethod;
         this.refundedAt = refundedAt;
+        this.finalizedBy = finalizedBy;
+        this.finalizedAt = finalizedAt;
     }
 
     /**
@@ -131,7 +139,7 @@ public class ReservationEntity {
                              BigDecimal pendingTransferAmount, String transferSupportReference,
                              String cancellationReason, String cancelledBy, Instant cancelledAt,
                              BigDecimal refundedAmount, String refundReason, String refundedBy,
-                             String refundMethod, Instant refundedAt) {
+                             String refundMethod, Instant refundedAt, String finalizedBy, Instant finalizedAt) {
         this.finalValue = finalValue;
         this.pendingBalance = pendingBalance;
         this.creditBalance = creditBalance;
@@ -148,6 +156,8 @@ public class ReservationEntity {
         this.refundedBy = refundedBy;
         this.refundMethod = refundMethod;
         this.refundedAt = refundedAt;
+        this.finalizedBy = finalizedBy;
+        this.finalizedAt = finalizedAt;
     }
 
     public void addReservedService(ReservedServiceEntity reservedService) {
@@ -237,6 +247,14 @@ public class ReservationEntity {
 
     public Instant getRefundedAt() {
         return refundedAt;
+    }
+
+    public String getFinalizedBy() {
+        return finalizedBy;
+    }
+
+    public Instant getFinalizedAt() {
+        return finalizedAt;
     }
 
     public List<ReservedServiceEntity> getReservedServices() {

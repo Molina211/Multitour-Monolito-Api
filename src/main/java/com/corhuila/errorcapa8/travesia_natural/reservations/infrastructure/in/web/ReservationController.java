@@ -3,6 +3,7 @@ package com.corhuila.errorcapa8.travesia_natural.reservations.infrastructure.in.
 import com.corhuila.errorcapa8.travesia_natural.common.security.JwtPrincipal;
 import com.corhuila.errorcapa8.travesia_natural.reservations.domain.exception.InvalidReservationException;
 import com.corhuila.errorcapa8.travesia_natural.reservations.domain.exception.ReservationNotCancellableException;
+import com.corhuila.errorcapa8.travesia_natural.reservations.domain.exception.ReservationNotFinalizableException;
 import com.corhuila.errorcapa8.travesia_natural.reservations.domain.exception.ReservationNotFoundException;
 import com.corhuila.errorcapa8.travesia_natural.reservations.domain.exception.ReservationNotRefundableException;
 import com.corhuila.errorcapa8.travesia_natural.reservations.domain.exception.TenantMismatchException;
@@ -12,12 +13,15 @@ import com.corhuila.errorcapa8.travesia_natural.reservations.domain.port.in.Canc
 import com.corhuila.errorcapa8.travesia_natural.reservations.domain.port.in.CancelReservationUseCase;
 import com.corhuila.errorcapa8.travesia_natural.reservations.domain.port.in.CreateReservationCommand;
 import com.corhuila.errorcapa8.travesia_natural.reservations.domain.port.in.CreateReservationUseCase;
+import com.corhuila.errorcapa8.travesia_natural.reservations.domain.port.in.FinalizeReservationCommand;
+import com.corhuila.errorcapa8.travesia_natural.reservations.domain.port.in.FinalizeReservationUseCase;
 import com.corhuila.errorcapa8.travesia_natural.reservations.domain.port.in.RefundReservationCommand;
 import com.corhuila.errorcapa8.travesia_natural.reservations.domain.port.in.RefundReservationUseCase;
 import com.corhuila.errorcapa8.travesia_natural.reservations.domain.port.in.ReservationQueryUseCase;
 import com.corhuila.errorcapa8.travesia_natural.common.web.dto.ErrorResponse;
 import com.corhuila.errorcapa8.travesia_natural.reservations.infrastructure.in.web.dto.CancelReservationRequest;
 import com.corhuila.errorcapa8.travesia_natural.reservations.infrastructure.in.web.dto.CreateReservationRequest;
+import com.corhuila.errorcapa8.travesia_natural.reservations.infrastructure.in.web.dto.FinalizeReservationRequest;
 import com.corhuila.errorcapa8.travesia_natural.reservations.infrastructure.in.web.dto.RefundReservationRequest;
 import com.corhuila.errorcapa8.travesia_natural.reservations.infrastructure.in.web.dto.ReservationResponse;
 import com.corhuila.errorcapa8.travesia_natural.reservations.infrastructure.in.web.dto.ReservedServiceRequest;
@@ -67,15 +71,18 @@ public class ReservationController {
     private final ReservationQueryUseCase reservationQueryUseCase;
     private final CancelReservationUseCase cancelReservationUseCase;
     private final RefundReservationUseCase refundReservationUseCase;
+    private final FinalizeReservationUseCase finalizeReservationUseCase;
 
     public ReservationController(CreateReservationUseCase createReservationUseCase,
                                   ReservationQueryUseCase reservationQueryUseCase,
                                   CancelReservationUseCase cancelReservationUseCase,
-                                  RefundReservationUseCase refundReservationUseCase) {
+                                  RefundReservationUseCase refundReservationUseCase,
+                                  FinalizeReservationUseCase finalizeReservationUseCase) {
         this.createReservationUseCase = createReservationUseCase;
         this.reservationQueryUseCase = reservationQueryUseCase;
         this.cancelReservationUseCase = cancelReservationUseCase;
         this.refundReservationUseCase = refundReservationUseCase;
+        this.finalizeReservationUseCase = finalizeReservationUseCase;
     }
 
     @PostMapping
@@ -167,6 +174,18 @@ public class ReservationController {
         return ResponseEntity.ok(ReservationResponse.from(reservation));
     }
 
+    @PostMapping("/{reservationId}/finalize")
+    public ResponseEntity<ReservationResponse> finalize(@PathVariable String tenantId,
+                                                           @PathVariable UUID reservationId,
+                                                           @RequestBody FinalizeReservationRequest request) {
+        FinalizeReservationCommand command = new FinalizeReservationCommand(
+                tenantId, reservationId, request.actorId());
+
+        Reservation reservation = finalizeReservationUseCase.finalizeReservation(command);
+
+        return ResponseEntity.ok(ReservationResponse.from(reservation));
+    }
+
     private List<ReservedService> toDomainReservedServices(List<ReservedServiceRequest> requests) {
         if (requests == null) {
             return List.of();
@@ -206,5 +225,11 @@ public class ReservationController {
     public ResponseEntity<ErrorResponse> handleReservationNotRefundable(ReservationNotRefundableException ex) {
         return ResponseEntity.status(HttpStatus.CONFLICT)
                 .body(new ErrorResponse("reservation_not_refundable", ex.getMessage()));
+    }
+
+    @ExceptionHandler(ReservationNotFinalizableException.class)
+    public ResponseEntity<ErrorResponse> handleReservationNotFinalizable(ReservationNotFinalizableException ex) {
+        return ResponseEntity.status(HttpStatus.CONFLICT)
+                .body(new ErrorResponse("reservation_not_finalizable", ex.getMessage()));
     }
 }
