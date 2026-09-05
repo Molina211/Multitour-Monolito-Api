@@ -1,6 +1,7 @@
 # 019 — Ciclo de vida completo de solicitud de devolución (autorización y ejecución separadas)
 
-**Estado:** APROBADA
+**Estado:** TERMINADA — implementada y verificada end-to-end (7 pasos contra BD real)
+el 2026-09-05. Ver `PLAN-VERIFICACION.md`, sección "019".
 **Fecha:** 2026-09-05
 **Repos afectados:** backend
 **HU relacionada:** ninguna HU formal en el backlog; se basa en RF-015B/RN-RES-008/RN-CAJ-001
@@ -56,23 +57,23 @@ pasos ni valida quién puede autorizar.
 
 ## Criterios de aceptación
 
-- [ ] Crear una solicitud de devolución sobre una reserva con causal registrada la deja en
+- [x] Crear una solicitud de devolución sobre una reserva con causal registrada la deja en
       `Pendiente de autorización`, con motivo y monto guardados.
-- [ ] Autorizar una solicitud pendiente con un actor `ADMINISTRATOR` del mismo tenant la
+- [x] Autorizar una solicitud pendiente con un actor `ADMINISTRATOR` del mismo tenant la
       deja en `Autorizada`, con nota y actor registrados. Con un actor que no sea
       `ADMINISTRATOR`, devuelve `403` y no la modifica.
-- [ ] Rechazar una solicitud pendiente con un actor `ADMINISTRATOR` la deja en `Rechazada`,
+- [x] Rechazar una solicitud pendiente con un actor `ADMINISTRATOR` la deja en `Rechazada`,
       con motivo obligatorio, y no genera ninguna salida de dinero.
-- [ ] Ejecutar con salida de dinero una solicitud `Autorizada` la deja en `Ejecutada`, con
+- [x] Ejecutar con salida de dinero una solicitud `Autorizada` la deja en `Ejecutada`, con
       método y referencia de caja registrados. Ejecutar una solicitud que no está
       `Autorizada` devuelve `409`.
-- [ ] Registrar una solicitud `Autorizada` como saldo a favor pendiente (sin salida
+- [x] Registrar una solicitud `Autorizada` como saldo a favor pendiente (sin salida
       efectiva) la deja en `Saldo a favor pendiente`, nunca en `Ejecutada`.
-- [ ] Consultar la solicitud de devolución de una reserva devuelve su estado actual junto
+- [x] Consultar la solicitud de devolución de una reserva devuelve su estado actual junto
       con el historial de motivo/actor/fecha de cada transición.
-- [ ] Toda operación sobre un `tenantId` inexistente devuelve `404`; sobre uno `Inactivo`,
+- [x] Toda operación sobre un `tenantId` inexistente devuelve `404`; sobre uno `Inactivo`,
       `409`.
-- [ ] El proyecto compila y las specs 001-018 siguen pasando.
+- [x] El proyecto compila y las specs 001-018 siguen pasando.
 
 ## Impacto en multitenencia
 

@@ -1,8 +1,8 @@
 # 013 — Caja diaria (base, movimientos, cierre y consolidación)
 
-**Estado:** APROBADA — alcance actualizado 2026-09-04 tras push real de Frontend (ver
-nota de reanudación y segunda revisión más abajo). `/plan-tareas` completado
-(`plan.md`, `tasks.md`); lista para implementación (T01).
+**Estado:** TERMINADA — implementada, verificada end-to-end contra BD real y con las
+correcciones de `/code-review` (persistencia, NPE, alineación de `CashMovementType`)
+cerradas. Ver `PLAN-VERIFICACION.md`, secciones "013" y siguientes.
 **Fecha:** 2026-09-03 (alcance revisado 2026-09-04)
 **Repos afectados:** backend (rama `hu-back-001-dev`)
 **HU relacionada:** ninguna HU formal en el backlog; se basa en RF-010/RN-CAJ-001 del PRD
@@ -109,42 +109,42 @@ movimiento de caja identificable, ni un total operativo del día. No hay forma d
 
 ## Criterios de aceptación
 
-- [ ] Abrir caja con `tenantId`, `businessDate`, `baseAmount` y `actorId` válidos devuelve
+- [x] Abrir caja con `tenantId`, `businessDate`, `baseAmount` y `actorId` válidos devuelve
       `201`, estado `ABIERTA`, `totalAmount` inicial igual a `baseAmount` (sin movimientos).
-- [ ] Abrir una segunda caja para el mismo `tenantId` + `businessDate` mientras la primera
+- [x] Abrir una segunda caja para el mismo `tenantId` + `businessDate` mientras la primera
       sigue `ABIERTA` devuelve `409`.
-- [ ] Registrar un movimiento `INGRESO` sobre una caja `ABIERTA` devuelve `200`/`201` y el
+- [x] Registrar un movimiento `INGRESO` sobre una caja `ABIERTA` devuelve `200`/`201` y el
       `totalAmount` consultado sube por ese monto.
-- [ ] Registrar movimientos `PAGO`, `GASTO` y `DEVOLUCION` sobre una caja `ABIERTA` hacen
+- [x] Registrar movimientos `PAGO`, `GASTO` y `DEVOLUCION` sobre una caja `ABIERTA` hacen
       bajar el `totalAmount` consultado por cada monto respectivo.
-- [ ] Registrar un movimiento con tipo `DEVOLUCION` en el endpoint genérico devuelve
+- [x] Registrar un movimiento con tipo `DEVOLUCION` en el endpoint genérico devuelve
       `400` — no es un tipo aceptado manualmente (se genera solo, ver AC de integración
       con spec 012 más abajo).
-- [ ] Registrar un movimiento con monto `<= 0`, sin tipo, o sin `actorId`/concepto devuelve
+- [x] Registrar un movimiento con monto `<= 0`, sin tipo, o sin `actorId`/concepto devuelve
       `400`.
-- [ ] Registrar un movimiento sobre una caja `CERRADA` devuelve `409` y no la modifica.
-- [ ] Cerrar una caja `ABIERTA` devuelve `200`, pasa a `CERRADA`, y dejan registrados
+- [x] Registrar un movimiento sobre una caja `CERRADA` devuelve `409` y no la modifica.
+- [x] Cerrar una caja `ABIERTA` devuelve `200`, pasa a `CERRADA`, y dejan registrados
       `closedBy`, `closedAt` y `totalAmount = baseAmount + ingresos - pagos - gastos -
       devoluciones` calculado con los movimientos registrados.
-- [ ] Cerrar una caja ya `CERRADA` devuelve `409`.
-- [ ] Consultar la caja de un `tenantId` + `businessDate` devuelve estado, base, todos los
+- [x] Cerrar una caja ya `CERRADA` devuelve `409`.
+- [x] Consultar la caja de un `tenantId` + `businessDate` devuelve estado, base, todos los
       movimientos registrados y el total (en vivo si `ABIERTA`, congelado si `CERRADA`).
-- [ ] Consultar el histórico de cajas `CERRADA`s de un `tenantId` devuelve la lista
+- [x] Consultar el histórico de cajas `CERRADA`s de un `tenantId` devuelve la lista
       ordenada, sin mezclar cajas de otros tenants.
-- [ ] Cualquier operación sobre un `tenantId` inexistente devuelve `404`; sobre uno
+- [x] Cualquier operación sobre un `tenantId` inexistente devuelve `404`; sobre uno
       `Inactivo`, `409`.
-- [ ] Al ejecutarse una devolución (spec 012) sobre una reserva, el total de caja del
+- [x] Al ejecutarse una devolución (spec 012) sobre una reserva, el total de caja del
       `tenantId`+`businessDate` correspondiente refleja esa devolución sin que nadie la
       registre manualmente por el endpoint de movimientos.
-- [ ] Consultar la consolidación mensual de un `tenantId` + periodo (`YYYY-MM`) devuelve
+- [x] Consultar la consolidación mensual de un `tenantId` + periodo (`YYYY-MM`) devuelve
       ingresos, pagos operacionales, gastos, devoluciones y total sumados a partir de los
       cierres `CERRADA`s de ese periodo (sin duplicar jornadas), **más `cancelaciones`
       (conteo de reservas `CANCELADA` con `cancelledAt` en ese periodo) y
       `costosOperacionales` (suma de `OperationCost` con `recordedAt` en ese periodo)**.
-- [ ] Agregar una corrección justificada sobre una caja ya `CERRADA` no reabre el cierre
+- [x] Agregar una corrección justificada sobre una caja ya `CERRADA` no reabre el cierre
       ni cambia su `totalAmount` congelado: queda registrada como historial adicional
       (justificación, autor, fecha) visible al consultar esa caja.
-- [ ] El proyecto compila y los tests existentes (specs 001-012) siguen pasando.
+- [x] El proyecto compila y los tests existentes (specs 001-012) siguen pasando.
 
 ## Impacto en multitenencia
 
