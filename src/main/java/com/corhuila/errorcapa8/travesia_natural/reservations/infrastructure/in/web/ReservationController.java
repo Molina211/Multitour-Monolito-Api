@@ -292,7 +292,8 @@ public class ReservationController {
             return List.of();
         }
         return requests.stream()
-                .map(r -> new ReservedService(r.serviceReference(), r.partySize(), r.scheduledDate()))
+                .map(r -> new ReservedService(r.serviceReference(), r.partySize(), r.scheduledDate(),
+                        r.transportItemId(), null))
                 .toList();
     }
 

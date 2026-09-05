@@ -9,7 +9,9 @@ import jakarta.persistence.JoinColumn;
 import jakarta.persistence.ManyToOne;
 import jakarta.persistence.Table;
 
+import java.math.BigDecimal;
 import java.time.LocalDate;
+import java.util.UUID;
 
 @Entity
 @Table(name = "reserved_services")
@@ -35,15 +37,24 @@ public class ReservedServiceEntity {
     @Column(name = "scheduled_date")
     private LocalDate scheduledDate;
 
+    @Column(name = "transport_item_id")
+    private UUID transportItemId;
+
+    @Column(name = "transport_cost")
+    private BigDecimal transportCost;
+
     protected ReservedServiceEntity() {
         // JPA
     }
 
-    public ReservedServiceEntity(String tenantId, String serviceReference, Integer partySize, LocalDate scheduledDate) {
+    public ReservedServiceEntity(String tenantId, String serviceReference, Integer partySize, LocalDate scheduledDate,
+                                  UUID transportItemId, BigDecimal transportCost) {
         this.tenantId = tenantId;
         this.serviceReference = serviceReference;
         this.partySize = partySize;
         this.scheduledDate = scheduledDate;
+        this.transportItemId = transportItemId;
+        this.transportCost = transportCost;
     }
 
     void assignTo(ReservationEntity reservation) {
@@ -68,5 +79,13 @@ public class ReservedServiceEntity {
 
     public LocalDate getScheduledDate() {
         return scheduledDate;
+    }
+
+    public UUID getTransportItemId() {
+        return transportItemId;
+    }
+
+    public BigDecimal getTransportCost() {
+        return transportCost;
     }
 }

@@ -3151,3 +3151,135 @@ quedaron guardados en ningún archivo de este repositorio; el resultado (`409
 reservation_not_discountable`) fue el mismo esperado. Los 7 pasos de esta sección
 devolvieron los códigos HTTP y payloads exactos documentados arriba, sin ningún hallazgo
 nuevo.
+
+## 024 — Transporte en reserva
+
+Corresponde a `specs/024-transporte-en-reserva/`. `ReservedService` gana
+`transportItemId` (UUID opcional de un `CatalogItem` de `type: TRANSPORT`) y
+`transportCost` (calculado en el servidor, `price * partySize`, nunca recibido del
+cliente). Migración `V20__add_transport_fields_to_reserved_services.sql` (columnas
+nullable en `reserved_services`). Cualquier `transportItemId` inválido (inexistente,
+otro tenant, tipo distinto de TRANSPORT, inactivo) devuelve `400 validation_error`
+reutilizando `InvalidReservationException`, no una excepción nueva. Requiere Postgres
+arriba, la app corriendo, el tenant `travesia-natural` `Activo`, y un token válido de
+`laura.gomez@example.com` (sección "007", paso 1) para crear reservas nuevas.
+
+```bash
+TOKEN="<accessToken de la sección 007, paso 1>"
+```
+
+### 1. Compilación y migración
+
+```bash
+./mvnw test
+```
+
+Debe migrar a la versión 20 (`add transport fields to reserved services`) y mantener
+`contextLoads` en verde.
+
+### 2. Catálogo de apoyo: un TRANSPORT activo, un TRANSPORT inactivo y un TOUR
+
+```bash
+curl -s -X POST http://localhost:8080/api/tenants/travesia-natural/catalog-items \
+  -H "Content-Type: application/json" \
+  -d '{ "type": "TRANSPORT", "name": "Transporte Desierto Tatacoa", "price": 30000 }'
+
+curl -s -X POST http://localhost:8080/api/tenants/travesia-natural/catalog-items \
+  -H "Content-Type: application/json" \
+  -d '{ "type": "TRANSPORT", "name": "Transporte fuera de servicio", "price": 20000 }'
+
+curl -s -X POST http://localhost:8080/api/tenants/travesia-natural/catalog-items \
+  -H "Content-Type: application/json" \
+  -d '{ "type": "TOUR", "name": "Caminata Cocora Spec024", "price": 120000 }'
+```
+
+Guardar los tres `catalogItemId` como `TRANSPORT_OK`, `TRANSPORT_INACTIVE` y `TOUR_ID`.
+Desactivar el segundo:
+
+```bash
+curl -i -X POST http://localhost:8080/api/tenants/travesia-natural/catalog-items/${TRANSPORT_INACTIVE}/deactivate
+```
+
+### 3. Crear una reserva con `transportItemId` válido (`201`)
+
+```bash
+curl -s -X POST http://localhost:8080/api/tenants/travesia-natural/reservations \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer ${TOKEN}" \
+  -d '{ "projectedValue": 260000, "reservedServices": [{ "serviceReference": "tour-desierto-tatacoa", "partySize": 2, "scheduledDate": "2026-12-15", "transportItemId": "'"${TRANSPORT_OK}"'" }] }'
+```
+
+Se espera `201 Created` con `reservedServices[0].transportItemId` igual a
+`TRANSPORT_OK` y `transportCost: 60000` (`30000 * 2`). Confirmar con un `GET`
+posterior a la reserva que ambos campos persisten igual.
+
+### 4. Crear una reserva sin transporte (`201`, ambos campos `null`)
+
+```bash
+curl -s -X POST http://localhost:8080/api/tenants/travesia-natural/reservations \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer ${TOKEN}" \
+  -d '{ "projectedValue": 100000, "reservedServices": [{ "serviceReference": "tour-laguna-verde", "partySize": 1, "scheduledDate": "2026-12-20" }] }'
+```
+
+Se espera `201 Created` con `reservedServices[0].transportItemId` y
+`reservedServices[0].transportCost` en `null`.
+
+### 5. `transportItemId` inválido — cuatro sub-casos (`400` cada uno)
+
+```bash
+curl -i -X POST http://localhost:8080/api/tenants/travesia-natural/reservations \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer ${TOKEN}" \
+  -d '{ "projectedValue": 100000, "reservedServices": [{ "serviceReference": "tour-laguna-verde", "partySize": 1, "scheduledDate": "2026-12-20", "transportItemId": "00000000-0000-0000-0000-000000000000" }] }'
+
+curl -i -X POST http://localhost:8080/api/tenants/travesia-natural/reservations \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer ${TOKEN}" \
+  -d '{ "projectedValue": 100000, "reservedServices": [{ "serviceReference": "tour-laguna-verde", "partySize": 1, "scheduledDate": "2026-12-20", "transportItemId": "'"${TOUR_ID}"'" }] }'
+
+curl -i -X POST http://localhost:8080/api/tenants/travesia-natural/reservations \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer ${TOKEN}" \
+  -d '{ "projectedValue": 100000, "reservedServices": [{ "serviceReference": "tour-laguna-verde", "partySize": 1, "scheduledDate": "2026-12-20", "transportItemId": "'"${TRANSPORT_INACTIVE}"'" }] }'
+```
+
+Las tres devuelven `400 Bad Request` con `{"error":"validation_error", ...}` (inexistente,
+tipo distinto de TRANSPORT, e inactivo respectivamente), y no se crea ninguna reserva.
+Para el cuarto sub-caso (`transportItemId` de otro tenant), crear un segundo tenant con
+su propio `TRANSPORT` (mismo patrón que sección "005", paso 3) y usar ese
+`catalogItemId` contra `travesia-natural`: mismo `400 validation_error`.
+
+### 6. Aislamiento/tenant `Inactivo` ya cubiertos por spec 007
+
+Con el JWT ya enforced (spec 007), `POST /reservations` no puede usarse para comprobar
+el `404` de "tenant inexistente" — mismo hueco ya documentado en la sección "007", paso
+4 (un token siempre lleva el tenant como claim, así que una URL con otro tenant o uno
+inexistente resuelve `403 tenant_mismatch` antes de llegar a la validación de
+transporte). El criterio que sí sigue vigente y se re-verificó en esta sección es
+tenant `Inactivo` → `409 tenant_inactive` (paso 6 de la sección "007"), reutilizando el
+mismo `TOKEN` y el mismo `transportItemId` válido del paso 3:
+
+```bash
+curl -i -X POST http://localhost:8080/api/tenants/travesia-natural/deactivate \
+  -H "Content-Type: application/json" \
+  -d '{ "reason": "Verificacion spec024", "actorId": "platform-admin@multitour.dev" }'
+
+curl -i -X POST http://localhost:8080/api/tenants/travesia-natural/reservations \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer ${TOKEN}" \
+  -d '{ "projectedValue": 100000, "reservedServices": [{ "serviceReference": "tour-laguna-verde", "partySize": 1, "scheduledDate": "2026-12-20", "transportItemId": "'"${TRANSPORT_OK}"'" }] }'
+```
+
+Se espera `409 Conflict` con `{"error":"tenant_inactive", ...}`. Reactivar el tenant al
+terminar (paso 6 de la sección "007").
+
+Ejecutado el 2026-09-05 contra la base de desarrollo local (mismo Postgres
+`multitour-postgres`, tenant `travesia-natural`, cliente `laura.gomez@example.com`
+existente). `./mvnw test` en verde, migración a versión 20 confirmada. Los pasos 1-5 de
+esta sección devolvieron los códigos HTTP y payloads exactos documentados arriba. El
+paso 6 reveló que el criterio de aceptación "tenant inexistente → 404" ya no es
+alcanzable desde este endpoint (lo intercepta el JWT con `403 tenant_mismatch`, mismo
+hallazgo ya registrado en la sección "007") — no es un hallazgo nuevo de esta spec, así
+que se ajustó el texto del paso 6 en vez de dejar la afirmación original sin verificar;
+`tenant_inactive` sí se confirmó con `409` como estaba previsto.
