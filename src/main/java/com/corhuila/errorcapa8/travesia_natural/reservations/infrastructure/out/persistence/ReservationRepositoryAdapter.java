@@ -80,12 +80,14 @@ public class ReservationRepositoryAdapter implements ReservationRepositoryPort {
                 reservation.modifiedAt());
 
         List<ReservedService> currentReservedServices = entity.getReservedServices().stream()
-                .map(rs -> new ReservedService(rs.getServiceReference(), rs.getPartySize(), rs.getScheduledDate()))
+                .map(rs -> new ReservedService(rs.getServiceReference(), rs.getPartySize(), rs.getScheduledDate(),
+                        rs.getTransportItemId(), rs.getTransportCost()))
                 .toList();
         if (!currentReservedServices.equals(reservation.reservedServices())) {
             entity.replaceReservedServices(reservation.reservedServices().stream()
                     .map(rs -> new ReservedServiceEntity(
-                            reservation.tenantId(), rs.serviceReference(), rs.partySize(), rs.scheduledDate()))
+                            reservation.tenantId(), rs.serviceReference(), rs.partySize(), rs.scheduledDate(),
+                            rs.transportItemId(), rs.transportCost()))
                     .toList());
         }
 
@@ -134,7 +136,9 @@ public class ReservationRepositoryAdapter implements ReservationRepositoryPort {
                     reservation.tenantId(),
                     reservedService.serviceReference(),
                     reservedService.partySize(),
-                    reservedService.scheduledDate()));
+                    reservedService.scheduledDate(),
+                    reservedService.transportItemId(),
+                    reservedService.transportCost()));
         }
 
         for (Companion companion : reservation.companions()) {
@@ -173,7 +177,8 @@ public class ReservationRepositoryAdapter implements ReservationRepositoryPort {
 
     private static Reservation toDomain(ReservationEntity entity) {
         List<ReservedService> reservedServices = entity.getReservedServices().stream()
-                .map(rs -> new ReservedService(rs.getServiceReference(), rs.getPartySize(), rs.getScheduledDate()))
+                .map(rs -> new ReservedService(rs.getServiceReference(), rs.getPartySize(), rs.getScheduledDate(),
+                        rs.getTransportItemId(), rs.getTransportCost()))
                 .toList();
 
         List<Companion> companions = entity.getCompanions().stream()

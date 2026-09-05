@@ -4,6 +4,7 @@ import com.corhuila.errorcapa8.travesia_natural.reservations.domain.exception.In
 import com.corhuila.errorcapa8.travesia_natural.reservations.domain.exception.PaymentAlreadyResolvedException;
 import com.corhuila.errorcapa8.travesia_natural.reservations.domain.exception.RefundNotAuthorizedException;
 import com.corhuila.errorcapa8.travesia_natural.reservations.domain.exception.ReservationNotCancellableException;
+import com.corhuila.errorcapa8.travesia_natural.reservations.domain.exception.ReservationNotDiscountableException;
 import com.corhuila.errorcapa8.travesia_natural.reservations.domain.exception.ReservationNotExecutableException;
 import com.corhuila.errorcapa8.travesia_natural.reservations.domain.exception.ReservationNotFinalizableException;
 import com.corhuila.errorcapa8.travesia_natural.reservations.domain.exception.ReservationNotModifiableException;
@@ -392,6 +393,54 @@ public final class Reservation {
                 refundRejectedBy, refundRejectedAt, refundRejectionReason, refundedAmount, refundReason, refundedBy,
                 refundMethod, refundedAt, finalizedBy, finalizedAt, reason, actorId, Instant.now(), holderDocument,
                 companions);
+    }
+
+    /**
+     * Aplica un descuento adicional sobre el valor final de la reserva (spec 023): solo
+     * permitido desde `PendienteDePago` o `Confirmada`. Se puede aplicar más de una vez
+     * sobre la misma reserva; cada aplicación se calcula sobre el `finalValue` vigente
+     * en ese momento (decisión abierta 1 de la spec, sin bloqueo de aplicaciones
+     * repetidas). Reutiliza exactamente la misma fórmula de saldo a favor que
+     * `cancel()`/`modify()` (spec 011/022): si lo ya pagado (`finalValue -
+     * pendingBalance`, con los valores ANTERIORES) supera el nuevo `finalValue`, el
+     * excedente queda como saldo a favor pendiente de devolución y nace una solicitud
+     * de devolución en `PENDIENTE_AUTORIZACION` (spec 019, RN-RES-008); si no, el nuevo
+     * saldo pendiente es simplemente la diferencia. No toca `reservedServices`/
+     * `projectedValue` (el descuento aplica solo sobre `finalValue`) ni los campos de
+     * `modify()` (son responsabilidades distintas).
+     */
+    public Reservation applyDiscount(Integer percentage, String reason, String actorId) {
+        if (percentage == null || percentage < 1 || percentage > 100) {
+            throw new InvalidReservationException("discount percentage must be between 1 and 100");
+        }
+        if (reason == null || reason.isBlank()) {
+            throw new InvalidReservationException("discount reason is required");
+        }
+        if (actorId == null || actorId.isBlank()) {
+            throw new InvalidReservationException("discount actorId is required");
+        }
+        if (reservationStatus != ReservationStatus.PENDIENTE_DE_PAGO && reservationStatus != ReservationStatus.CONFIRMADA) {
+            throw new ReservationNotDiscountableException(
+                    "reservation must be PendienteDePago or Confirmada to apply a discount, current status: "
+                            + reservationStatus.label() + " (reservation: " + reservationId + ")");
+        }
+        BigDecimal newFinalValue = finalValue.multiply(BigDecimal.valueOf(100 - percentage))
+                .divide(BigDecimal.valueOf(100));
+        BigDecimal amountAlreadyPaid = finalValue.subtract(pendingBalance);
+        BigDecimal rawNewPendingBalance = newFinalValue.subtract(amountAlreadyPaid);
+        boolean overpaid = rawNewPendingBalance.signum() < 0;
+        BigDecimal newPendingBalance = overpaid ? BigDecimal.ZERO : rawNewPendingBalance;
+        BigDecimal newCreditBalance = overpaid ? rawNewPendingBalance.negate() : creditBalance;
+        PaymentStatus newPaymentStatus = overpaid ? PaymentStatus.SALDO_A_FAVOR_PENDIENTE : paymentStatus;
+        RefundDecisionStatus newRefundDecisionStatus =
+                overpaid ? RefundDecisionStatus.PENDIENTE_AUTORIZACION : refundDecisionStatus;
+        return new Reservation(reservationId, tenantId, customerId, reservedServices, projectedValue, newFinalValue,
+                newPendingBalance, newCreditBalance, reservationStatus, newPaymentStatus, paymentMethod, createdAt,
+                pendingTransferAmount, transferSupportReference, cancellationReason, cancelledBy, cancelledAt,
+                newRefundDecisionStatus, refundAuthorizedBy, refundAuthorizedAt, refundAuthorizationNote,
+                refundRejectedBy, refundRejectedAt, refundRejectionReason, refundedAmount, refundReason, refundedBy,
+                refundMethod, refundedAt, finalizedBy, finalizedAt, modificationReason, modifiedBy, modifiedAt,
+                holderDocument, companions);
     }
 
     /**
