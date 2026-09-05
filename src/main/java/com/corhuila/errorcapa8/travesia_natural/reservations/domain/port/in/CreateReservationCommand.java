@@ -4,8 +4,7 @@ import com.corhuila.errorcapa8.travesia_natural.reservations.domain.model.Reserv
 
 import java.math.BigDecimal;
 import java.util.List;
-import java.util.UUID;
 
-public record CreateReservationCommand(UUID tenantId, String customerId, BigDecimal projectedValue,
+public record CreateReservationCommand(String tenantId, String customerId, BigDecimal projectedValue,
                                         List<ReservedService> reservedServices) {
 }

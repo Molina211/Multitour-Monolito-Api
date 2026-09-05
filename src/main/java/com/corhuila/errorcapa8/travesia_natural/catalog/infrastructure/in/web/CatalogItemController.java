@@ -57,7 +57,8 @@ public class CatalogItemController {
                                                         @RequestBody CatalogItemRequest request) {
         CreateCatalogItemCommand command = new CreateCatalogItemCommand(
                 tenantId, request.type(), request.name(), request.price(), request.capacity(),
-                request.restrictions(), request.validFrom(), request.validTo(), request.policy(), request.image());
+                request.restrictions(), request.validFrom(), request.validTo(), request.policy(), request.image(),
+                request.route(), request.operationalCost());
 
         CatalogItem catalogItem = createCatalogItemUseCase.createCatalogItem(command);
 
@@ -83,7 +84,8 @@ public class CatalogItemController {
                                                         @RequestBody CatalogItemPatchRequest request) {
         UpdateCatalogItemCommand command = new UpdateCatalogItemCommand(
                 tenantId, itemId, request.name(), request.price(), request.capacity(), request.restrictions(),
-                request.validFrom(), request.validTo(), request.policy(), request.image());
+                request.validFrom(), request.validTo(), request.policy(), request.image(), request.route(),
+                request.operationalCost());
 
         CatalogItem catalogItem = updateCatalogItemUseCase.updateCatalogItem(command);
 

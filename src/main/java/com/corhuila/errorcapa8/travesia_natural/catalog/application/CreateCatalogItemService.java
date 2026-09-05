@@ -34,7 +34,8 @@ public class CreateCatalogItemService implements CreateCatalogItemUseCase {
 
         CatalogItem catalogItem = CatalogItem.create(
                 tenant.tenantId(), command.type(), command.name(), command.price(), command.capacity(),
-                command.restrictions(), command.validFrom(), command.validTo(), command.policy(), command.image());
+                command.restrictions(), command.validFrom(), command.validTo(), command.policy(), command.image(),
+                command.route(), command.operationalCost());
 
         return catalogItemRepositoryPort.save(catalogItem);
     }

@@ -32,6 +32,8 @@ public class CatalogItemRepositoryAdapter implements CatalogItemRepositoryPort {
                 catalogItem.validTo(),
                 catalogItem.policy(),
                 catalogItem.image(),
+                catalogItem.route(),
+                catalogItem.operationalCost(),
                 catalogItem.active(),
                 catalogItem.createdAt()));
 
@@ -64,6 +66,8 @@ public class CatalogItemRepositoryAdapter implements CatalogItemRepositoryPort {
                 entity.getValidTo(),
                 entity.getPolicy(),
                 entity.getImage(),
+                entity.getRoute(),
+                entity.getOperationalCost(),
                 entity.isActive(),
                 entity.getCreatedAt());
     }
