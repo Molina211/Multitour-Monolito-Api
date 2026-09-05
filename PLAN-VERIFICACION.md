@@ -2767,3 +2767,57 @@ Ejecutado el 2026-09-05 contra la base de desarrollo local (mismo Postgres
 Administrator, colaborador y End Customer creados para la ocasión). Los 6 pasos del
 plan y la verificación adicional de `actorId` desconocido devolvieron los códigos
 HTTP y payloads exactos documentados arriba.
+
+## 021 — Completar campos de trazabilidad de `AuditRecord`
+
+Corresponde a `specs/021-audit-record-traceability-fields/`. Agrega a `AuditRecord`
+los campos `previousValue`, `newValue`, `channelOrModule` y
+`functionalProcessReference` (todos opcionales), ya confirmados en
+`06-data/models.md` pero ausentes en el Backend hasta ahora. `DeactivateTenantService`
+y `ReactivateTenantService` se actualizan como caso de uso de ejemplo para llenarlos
+con valores reales. Requiere Postgres arriba (migración V18, columnas nuevas en
+`audit_records`) y la app corriendo.
+
+### 1. Los registros de auditoría previos se siguen leyendo sin error
+
+```bash
+curl -s http://localhost:8080/api/audit
+```
+
+Se espera `200 OK` con la lista completa (52 registros preexistentes al momento de
+la verificación), cada uno con `previousValue`, `newValue`, `channelOrModule` y
+`functionalProcessReference` presentes como claves y en `null`.
+
+### 2. Desactivar un tenant activo registra `previousValue`/`newValue` reales
+
+```bash
+curl -s -X POST http://localhost:8080/api/tenants/spec020-demo/deactivate \
+  -H "Content-Type: application/json" \
+  -d '{ "reason": "prueba spec 021", "actorId": "<membershipId admin>" }'
+
+curl -s http://localhost:8080/api/audit
+```
+
+Se espera que el registro más nuevo (`action: "TENANT_DEACTIVATED"`) traiga
+`previousValue: "Activo"`, `newValue: "Inactivo"`, `channelOrModule: "tenants"` y
+`functionalProcessReference: "Cambio de estado de operador"`.
+
+### 3. Reactivarlo confirma el sentido inverso
+
+```bash
+curl -s -X POST http://localhost:8080/api/tenants/spec020-demo/reactivate \
+  -H "Content-Type: application/json" \
+  -d '{ "reason": "fin prueba spec 021", "actorId": "<membershipId admin>" }'
+
+curl -s http://localhost:8080/api/audit
+```
+
+Se espera que el registro más nuevo (`action: "TENANT_REACTIVATED"`) traiga
+`previousValue: "Inactivo"`, `newValue: "Activo"`, con el mismo `channelOrModule`
+y `functionalProcessReference` que el paso anterior.
+
+Ejecutado el 2026-09-05 contra la base de desarrollo local (mismo Postgres
+`multitour-postgres`, migración V18 aplicada, reutilizando el tenant de prueba
+`spec020-demo`). Los 3 pasos devolvieron los payloads exactos documentados arriba;
+los 52 registros de auditoría preexistentes (de specs 002-020) se siguieron leyendo
+sin error con los 4 campos nuevos en `null`.

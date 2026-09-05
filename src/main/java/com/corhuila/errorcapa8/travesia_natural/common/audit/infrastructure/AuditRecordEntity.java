@@ -34,12 +34,26 @@ public class AuditRecordEntity {
     @Column(name = "recorded_at", nullable = false)
     private Instant recordedAt;
 
+    @Column(name = "previous_value")
+    private String previousValue;
+
+    @Column(name = "new_value")
+    private String newValue;
+
+    @Column(name = "channel_or_module")
+    private String channelOrModule;
+
+    @Column(name = "functional_process_reference")
+    private String functionalProcessReference;
+
     protected AuditRecordEntity() {
         // JPA
     }
 
     public AuditRecordEntity(UUID auditRecordId, String tenantId, String actorId, String action,
-                              String affectedRecordId, String reason, Instant recordedAt) {
+                              String affectedRecordId, String reason, Instant recordedAt,
+                              String previousValue, String newValue, String channelOrModule,
+                              String functionalProcessReference) {
         this.auditRecordId = auditRecordId;
         this.tenantId = tenantId;
         this.actorId = actorId;
@@ -47,6 +61,10 @@ public class AuditRecordEntity {
         this.affectedRecordId = affectedRecordId;
         this.reason = reason;
         this.recordedAt = recordedAt;
+        this.previousValue = previousValue;
+        this.newValue = newValue;
+        this.channelOrModule = channelOrModule;
+        this.functionalProcessReference = functionalProcessReference;
     }
 
     public UUID getAuditRecordId() {
@@ -75,5 +93,21 @@ public class AuditRecordEntity {
 
     public Instant getRecordedAt() {
         return recordedAt;
+    }
+
+    public String getPreviousValue() {
+        return previousValue;
+    }
+
+    public String getNewValue() {
+        return newValue;
+    }
+
+    public String getChannelOrModule() {
+        return channelOrModule;
+    }
+
+    public String getFunctionalProcessReference() {
+        return functionalProcessReference;
     }
 }
