@@ -1,20 +1,58 @@
+name: multitour
+
 services:
   postgres:
     image: postgres:16-alpine
     container_name: multitour-postgres
     environment:
-      POSTGRES_DB: multitour
-      POSTGRES_USER: multitour
-      POSTGRES_PASSWORD: multitour
+      POSTGRES_DB: ${POSTGRES_DB:-multitour}
+      POSTGRES_USER: ${POSTGRES_USER:-multitour}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-multitour}
     ports:
       - "5433:5432"
     volumes:
       - multitour-postgres-data:/var/lib/postgresql/data
+    networks:
+      - multitour-net
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U multitour -d multitour"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-multitour} -d ${POSTGRES_DB:-multitour}"]
       interval: 5s
       timeout: 5s
       retries: 5
+
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: multitour-backend
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/${POSTGRES_DB:-multitour}
+      SPRING_DATASOURCE_USERNAME: ${POSTGRES_USER:-multitour}
+      SPRING_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD:-multitour}
+      APP_JWT_SECRET: ${APP_JWT_SECRET:-dev-only-secret-multitour-2026-cambiar-en-produccion-0123456789abcdef}
+    ports:
+      - "8081:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - multitour-net
+
+  frontend:
+    build:
+      context: ../Frontend
+      dockerfile: Dockerfile
+    container_name: multitour-frontend
+    ports:
+      - "8080:80"
+    depends_on:
+      - backend
+    networks:
+      - multitour-net
+
+networks:
+  multitour-net:
+    driver: bridge
 
 volumes:
   multitour-postgres-data:
