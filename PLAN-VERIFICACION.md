@@ -2507,3 +2507,108 @@ sección (creación con acompañantes válidos, creación sin campos opcionales,
 por documento duplicado con el titular, rechazo por documento duplicado entre
 acompañantes, y `GET`/listado reflejando los datos guardados) devolvieron los
 códigos HTTP y payloads exactos documentados arriba.
+
+## 019 — Ciclo de vida de la solicitud de devolución (Refund)
+
+Corresponde a `specs/019-refund-request-lifecycle/`. Agrega el estado
+`refundDecisionStatus` (RN-RES-008) a `Reservation`:
+`PENDIENTE_AUTORIZACION → AUTORIZADA/RECHAZADA → EJECUTADA/SALDO_A_FAVOR_REGISTRADO`,
+con tres endpoints nuevos bajo `POST .../reservations/{reservationId}/refund/...`
+(`authorize`, `reject`, `credit-balance`) que solo un `Membership` `ADMINISTRATOR`
+del tenant puede invocar (`actorId` = `membershipId`). Requiere Postgres arriba
+(migración V16, columna `refund_decision_status` y afines) y la app corriendo.
+
+Se creó un tenant de prueba dedicado `spec019-refund-demo` (con su Administrator,
+un colaborador `OPERATIONAL_COLLABORATOR` y un `END_CUSTOMER`) para no interferir
+con los datos de `travesia-natural`.
+
+### 1. Cancelar una reserva pagada deja `refundDecisionStatus: Pendiente de autorizacion`
+
+Reserva creada vía `POST .../reservations` (con token JWT del `END_CUSTOMER`),
+pagada por completo en efectivo (`POST .../payments`) y cancelada
+(`POST .../{reservationId}/cancel`, `actorId` = membershipId del Administrator).
+El `GET` de la reserva confirma `refundDecisionStatus: "Pendiente de autorizacion"`,
+`creditBalance` igual al monto pagado y `paymentStatus: "Saldo a favor pendiente"`.
+
+### 2. Ejecutar el refund sin autorizar (`409`)
+
+```bash
+curl -i -X POST http://localhost:8080/api/tenants/spec019-refund-demo/reservations/{reservationId}/refund \
+  -H "Content-Type: application/json" \
+  -d '{ "amount": 300000, "reason": "Devolucion por cancelacion", "actorId": "<membershipId admin>", "method": "EFECTIVO" }'
+```
+
+Se espera `409 Conflict` con `{"error":"refund_not_authorized", "message":"cannot execute refund, current refundDecisionStatus: Pendiente de autorizacion..."}`.
+
+### 3. Autorizar con un `actorId` `OPERATIONAL_COLLABORATOR` (`403`)
+
+```bash
+curl -i -X POST http://localhost:8080/api/tenants/spec019-refund-demo/reservations/{reservationId}/refund/authorize \
+  -H "Content-Type: application/json" \
+  -d '{ "actorId": "<membershipId colaborador>", "note": "Autorizo devolucion" }'
+```
+
+Se espera `403 Forbidden` con `{"error":"refund_action_not_allowed", "message":"only an ADMINISTRATOR can decide on a refund request, actor role: OPERATIONAL_COLLABORATOR"}`.
+
+### 4. Autorizar con un `actorId` `ADMINISTRATOR` (`200`, `Autorizada`)
+
+```bash
+curl -i -X POST http://localhost:8080/api/tenants/spec019-refund-demo/reservations/{reservationId}/refund/authorize \
+  -H "Content-Type: application/json" \
+  -d '{ "actorId": "<membershipId admin>", "note": "Autorizo devolucion en efectivo" }'
+```
+
+Se espera `200 OK` con `refundDecisionStatus: "Autorizada"`, `refundAuthorizedBy`
+igual al `actorId` y `refundAuthorizedAt`/`refundAuthorizationNote` con los valores
+enviados. Reintentar la autorización sobre la misma reserva ya `Autorizada` devuelve
+`409 refund_not_authorized` (idempotencia confirmada).
+
+### 5. Ejecutar el refund ya autorizado (`200`, `Ejecutada`)
+
+```bash
+curl -i -X POST http://localhost:8080/api/tenants/spec019-refund-demo/reservations/{reservationId}/refund \
+  -H "Content-Type: application/json" \
+  -d '{ "amount": 300000, "reason": "Devolucion por cancelacion", "actorId": "<membershipId admin>", "method": "EFECTIVO" }'
+```
+
+Se espera `200 OK` con `refundDecisionStatus: "Ejecutada"`, `refundedAmount: 300000`,
+`refundReason`, `refundMethod` y `refundedAt` con los valores enviados/generados, y
+`paymentStatus: "Devuelto parcial o total"`.
+
+### 6. Repetir 1-4 y registrar el refund como saldo a favor (`200`, `Saldo a favor pendiente`)
+
+Con una segunda reserva (creada, pagada, cancelada y autorizada igual que en los
+pasos 1 y 4):
+
+```bash
+curl -i -X POST http://localhost:8080/api/tenants/spec019-refund-demo/reservations/{reservationId}/refund/credit-balance \
+  -H "Content-Type: application/json" \
+  -d '{ "actorId": "<membershipId admin>" }'
+```
+
+Se espera `200 OK` con `refundDecisionStatus: "Saldo a favor pendiente"` (label de
+`SALDO_A_FAVOR_REGISTRADO`), sin tocar `paymentStatus` ni `creditBalance` (quedan
+igual que tras la cancelación).
+
+### 7. Repetir el paso 1 y rechazar en vez de autorizar (`200`, `Rechazada`) — luego `409` al ejecutar
+
+Con una tercera reserva (creada, pagada y cancelada igual que en el paso 1):
+
+```bash
+curl -i -X POST http://localhost:8080/api/tenants/spec019-refund-demo/reservations/{reservationId}/refund/reject \
+  -H "Content-Type: application/json" \
+  -d '{ "actorId": "<membershipId admin>", "reason": "Motivo de cancelacion no cumple politica de devolucion" }'
+```
+
+Se espera `200 OK` con `refundDecisionStatus: "Rechazada"`, `refundRejectedBy`,
+`refundRejectedAt` y `refundRejectionReason` con los valores enviados, sin tocar
+`paymentStatus`/`creditBalance`. Intentar ejecutar el refund después
+(`POST .../refund`) sobre esa misma reserva devuelve `409 Conflict` con
+`{"error":"refund_not_authorized", "message":"cannot execute refund, current refundDecisionStatus: Rechazada..."}`.
+
+Ejecutado el 2026-09-05 contra la base de desarrollo local (mismo Postgres
+`multitour-postgres`, migración V16 aplicada, tenant de prueba
+`spec019-refund-demo` con Administrator, colaborador y End Customer creados para la
+ocasión). Los 7 pasos anteriores devolvieron los códigos HTTP y payloads exactos
+documentados arriba, incluyendo la validación adicional de idempotencia del paso 4
+(reintentar `authorize` sobre una reserva ya `Autorizada` devuelve `409`).
