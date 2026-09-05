@@ -2612,3 +2612,158 @@ Ejecutado el 2026-09-05 contra la base de desarrollo local (mismo Postgres
 ocasión). Los 7 pasos anteriores devolvieron los códigos HTTP y payloads exactos
 documentados arriba, incluyendo la validación adicional de idempotencia del paso 4
 (reintentar `authorize` sobre una reserva ya `Autorizada` devuelve `409`).
+
+## 020 — Permiso de Colaborador para validar soportes de transferencia
+
+Corresponde a `specs/020-collaborator-support-validation-permission/`. Agrega el
+campo `allowCollaboratorSupportValidation` (boolean, `false` por defecto) a
+`Tenant`, con un endpoint `PATCH /api/tenants/{tenantId}/collaborator-support-permission`
+que solo un `Membership` `ADMINISTRATOR` puede invocar. `DecidePaymentSupportService`
+(`POST .../reservations/{reservationId}/payments/decide-support`) ahora resuelve el
+`Membership` del `actorId` recibido y aplica RN del PDR línea 115: `ADMINISTRATOR`
+siempre puede decidir; `OPERATIONAL_COLLABORATOR` solo si el tenant tiene el flag
+habilitado. Requiere Postgres arriba (migración V17, columna
+`allow_collaborator_support_validation`) y la app corriendo.
+
+Se creó un tenant de prueba dedicado `spec020-demo` (con su Administrator, un
+colaborador `OPERATIONAL_COLLABORATOR` y un `END_CUSTOMER`) para no interferir con
+los datos de `travesia-natural` ni de `spec019-refund-demo`.
+
+### 1. Crear el tenant y el colaborador (permiso `false` por defecto)
+
+```bash
+curl -s -X POST http://localhost:8080/api/tenants \
+  -H "Content-Type: application/json" \
+  -d '{ "tenantId": "spec020-demo", "commercialName": "Spec020 Demo",
+        "administrator": {"email": "admin020@example.com", "password": "Passw0rd!", "passwordConfirmation": "Passw0rd!"},
+        "actorId": "system" }'
+
+curl -s -X POST http://localhost:8080/api/tenants/spec020-demo/collaborators \
+  -H "Content-Type: application/json" \
+  -d '{ "name": "Colaborador Operativo", "email": "colab020@example.com", "password": "Passw0rd!", "passwordConfirmation": "Passw0rd!", "actorId": "<membershipId admin>" }'
+```
+
+El `GET /api/tenants/spec020-demo` confirma `allowCollaboratorSupportValidation: false`.
+
+### 2. Con una reserva en validación de soporte, decidir con el `actorId` del colaborador (`403`)
+
+Reserva creada vía `POST .../reservations` (token JWT del `END_CUSTOMER`) y pagada
+con `POST .../payments` usando `method: "TRANSFERENCIA"`, lo que deja
+`paymentStatus: "En validacion"`.
+
+```bash
+curl -i -X POST http://localhost:8080/api/tenants/spec020-demo/reservations/{reservationId}/payments/decide-support \
+  -H "Content-Type: application/json" \
+  -d '{ "decision": "APPROVE", "reason": "Comprobante verificado", "actorId": "<membershipId colaborador>" }'
+```
+
+Se espera `403 Forbidden` con `{"error":"support_validation_not_allowed", "message":"actor role OPERATIONAL_COLLABORATOR is not allowed to decide a payment support for tenant spec020-demo"}`.
+
+### 3. Activar el permiso con un `actorId` `ADMINISTRATOR` (`200`)
+
+```bash
+curl -i -X PATCH http://localhost:8080/api/tenants/spec020-demo/collaborator-support-permission \
+  -H "Content-Type: application/json" \
+  -d '{ "actorId": "<membershipId admin>", "allow": true }'
+```
+
+Se espera `200 OK` con `allowCollaboratorSupportValidation: true` en la respuesta.
+
+### 4. Repetir el paso 2 (`200`, decisión aplicada)
+
+Mismo `curl` del paso 2, ahora con el permiso habilitado. Se espera `200 OK` con
+`reservationStatus: "Confirmada"` y `paymentStatus: "Pagado"`.
+
+### 5. Intentar activar el permiso con el `actorId` del colaborador (`403`)
+
+```bash
+curl -i -X PATCH http://localhost:8080/api/tenants/spec020-demo/collaborator-support-permission \
+  -H "Content-Type: application/json" \
+  -d '{ "actorId": "<membershipId colaborador>", "allow": false }'
+```
+
+Se espera `403 Forbidden` con `{"error":"tenant_permission_not_allowed", "message":"only an ADMINISTRATOR can change the collaborator support validation permission, actor role: OPERATIONAL_COLLABORATOR"}`.
+
+### 6. Decidir con un `actorId` `ADMINISTRATOR` en cualquier momento (siempre `200`)
+
+Con el permiso desactivado de nuevo (`allow: false` desde el Administrator) y una
+segunda reserva en validación de soporte:
+
+```bash
+curl -i -X POST http://localhost:8080/api/tenants/spec020-demo/reservations/{reservationId}/payments/decide-support \
+  -H "Content-Type: application/json" \
+  -d '{ "decision": "APPROVE", "reason": "Comprobante verificado por admin", "actorId": "<membershipId admin>" }'
+```
+
+Se espera `200 OK` sin importar el valor del flag, porque `ADMINISTRATOR` siempre
+puede decidir.
+
+### Bonus: `actorId` desconocido al cambiar el permiso (`403`)
+
+```bash
+curl -i -X PATCH http://localhost:8080/api/tenants/spec020-demo/collaborator-support-permission \
+  -H "Content-Type: application/json" \
+  -d '{ "actorId": "00000000-0000-0000-0000-000000000000", "allow": true }'
+```
+
+Se espera `403 Forbidden` con `{"error":"tenant_permission_not_allowed", "message":"membership not found for actorId: 00000000-0000-0000-0000-000000000000 in tenant spec020-demo"}`.
+
+### Bonus: `actorId` ausente (`null`) no debe devolver `500`
+
+Hallazgo de `/code-review`: `UUID.fromString(null)` lanza `NullPointerException`, no
+`IllegalArgumentException`, y el `catch` original solo capturaba esta última —
+un `actorId` ausente en el body terminaba en `500` sin mapear en vez del `403`
+esperado. Se corrigió con un chequeo explícito de `null` antes del parseo, en
+`DecidePaymentSupportService` y `UpdateCollaboratorSupportValidationPermissionService`.
+
+```bash
+curl -i -X POST http://localhost:8080/api/tenants/spec020-demo/reservations/{reservationId}/payments/decide-support \
+  -H "Content-Type: application/json" \
+  -d '{ "decision": "APPROVE", "reason": "test null actor" }'
+
+curl -i -X PATCH http://localhost:8080/api/tenants/spec020-demo/collaborator-support-permission \
+  -H "Content-Type: application/json" \
+  -d '{ "allow": true }'
+```
+
+Ambos devuelven `403 Forbidden` (`support_validation_not_allowed` /
+`tenant_permission_not_allowed`) con `"actorId must be a valid membershipId: null"`.
+
+### Bonus: cambiar el permiso sobre un tenant `Inactivo` (`409`, no `400`)
+
+Hallazgo de `/code-review`: `UpdateCollaboratorSupportValidationPermissionService`
+no verificaba `tenant.tenantStatus()` antes de mutar, así que un tenant `Inactivo`
+devolvía `400 validation_error` (por `InvalidTenantException` del dominio) en vez
+de `409 tenant_inactive`, rompiendo la convención del resto del módulo `tenants`
+(ver `RegisterCollaboratorService`). Se corrigió agregando el chequeo explícito en
+el servicio y su `@ExceptionHandler` correspondiente en `TenantController`.
+
+```bash
+curl -i -X POST http://localhost:8080/api/tenants/spec020-demo/deactivate \
+  -H "Content-Type: application/json" \
+  -d '{ "reason": "prueba desactivacion", "actorId": "<membershipId admin>" }'
+
+curl -i -X PATCH http://localhost:8080/api/tenants/spec020-demo/collaborator-support-permission \
+  -H "Content-Type: application/json" \
+  -d '{ "actorId": "<membershipId admin>", "allow": true }'
+```
+
+Se espera `409 Conflict` con `{"error":"tenant_inactive", "message":"tenant is Inactivo: spec020-demo"}`.
+Reactivado el tenant al final de la prueba (`POST .../reactivate`) para dejarlo en
+estado limpio.
+
+### Deuda conocida (no corregida en esta spec)
+
+`/code-review` encontró que ni `DecidePaymentSupportService` ni
+`UpdateCollaboratorSupportValidationPermissionService` (ni el `RefundActorValidator`
+preexistente de spec 019) verifican `membershipStatus`: un `Membership` desactivado
+conserva su `membershipId` y puede seguir actuando en estos tres casos de uso, ya
+que no pasan por `LoginService`/JWT. Corregirlo tocaría también código ya pusheado
+de spec 019 y no es un criterio de aceptación de la spec 020 — queda documentado
+como deuda compartida, pendiente de decisión (spec propia o fix puntual).
+
+Ejecutado el 2026-09-05 contra la base de desarrollo local (mismo Postgres
+`multitour-postgres`, migración V17 aplicada, tenant de prueba `spec020-demo` con
+Administrator, colaborador y End Customer creados para la ocasión). Los 6 pasos del
+plan y la verificación adicional de `actorId` desconocido devolvieron los códigos
+HTTP y payloads exactos documentados arriba.

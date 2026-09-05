@@ -18,12 +18,15 @@ public final class Tenant {
     private final String commercialName;
     private final TenantStatus tenantStatus;
     private final Instant createdAt;
+    private final boolean allowCollaboratorSupportValidation;
 
-    private Tenant(String tenantId, String commercialName, TenantStatus tenantStatus, Instant createdAt) {
+    private Tenant(String tenantId, String commercialName, TenantStatus tenantStatus, Instant createdAt,
+                   boolean allowCollaboratorSupportValidation) {
         this.tenantId = tenantId;
         this.commercialName = commercialName;
         this.tenantStatus = tenantStatus;
         this.createdAt = createdAt;
+        this.allowCollaboratorSupportValidation = allowCollaboratorSupportValidation;
     }
 
     /**
@@ -38,7 +41,7 @@ public final class Tenant {
             throw new InvalidTenantException("commercialName is required");
         }
 
-        return new Tenant(tenantId, commercialName, TenantStatus.ACTIVO, Instant.now());
+        return new Tenant(tenantId, commercialName, TenantStatus.ACTIVO, Instant.now(), false);
     }
 
     /**
@@ -46,8 +49,8 @@ public final class Tenant {
      * passed through {@link #create} once.
      */
     public static Tenant reconstitute(String tenantId, String commercialName, TenantStatus tenantStatus,
-                                       Instant createdAt) {
-        return new Tenant(tenantId, commercialName, tenantStatus, createdAt);
+                                       Instant createdAt, boolean allowCollaboratorSupportValidation) {
+        return new Tenant(tenantId, commercialName, tenantStatus, createdAt, allowCollaboratorSupportValidation);
     }
 
     /**
@@ -58,7 +61,8 @@ public final class Tenant {
         if (tenantStatus == TenantStatus.INACTIVO) {
             throw new InvalidTenantException("tenant is already Inactivo: " + tenantId);
         }
-        return new Tenant(tenantId, commercialName, TenantStatus.INACTIVO, createdAt);
+        return new Tenant(tenantId, commercialName, TenantStatus.INACTIVO, createdAt,
+                allowCollaboratorSupportValidation);
     }
 
     /**
@@ -69,7 +73,20 @@ public final class Tenant {
         if (tenantStatus == TenantStatus.ACTIVO) {
             throw new InvalidTenantException("tenant is already Activo: " + tenantId);
         }
-        return new Tenant(tenantId, commercialName, TenantStatus.ACTIVO, createdAt);
+        return new Tenant(tenantId, commercialName, TenantStatus.ACTIVO, createdAt,
+                allowCollaboratorSupportValidation);
+    }
+
+    /**
+     * Toggles whether an {@code OPERATIONAL_COLLABORATOR} may decide on transfer support
+     * (spec 020, PDR line 115). Requires the tenant to be Activo, same precondition as the
+     * rest of the tenant's lifecycle operations.
+     */
+    public Tenant updateCollaboratorSupportValidationPermission(boolean allow) {
+        if (tenantStatus != TenantStatus.ACTIVO) {
+            throw new InvalidTenantException("tenant must be Activo to change its permissions: " + tenantId);
+        }
+        return new Tenant(tenantId, commercialName, tenantStatus, createdAt, allow);
     }
 
     public String tenantId() {
@@ -86,5 +103,9 @@ public final class Tenant {
 
     public Instant createdAt() {
         return createdAt;
+    }
+
+    public boolean allowCollaboratorSupportValidation() {
+        return allowCollaboratorSupportValidation;
     }
 }

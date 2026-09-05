@@ -3,7 +3,9 @@ package com.corhuila.errorcapa8.travesia_natural.tenants.infrastructure.in.web;
 import com.corhuila.errorcapa8.travesia_natural.common.web.dto.ErrorResponse;
 import com.corhuila.errorcapa8.travesia_natural.tenants.domain.exception.InvalidTenantException;
 import com.corhuila.errorcapa8.travesia_natural.tenants.domain.exception.TenantAlreadyExistsException;
+import com.corhuila.errorcapa8.travesia_natural.tenants.domain.exception.TenantInactiveException;
 import com.corhuila.errorcapa8.travesia_natural.tenants.domain.exception.TenantNotFoundException;
+import com.corhuila.errorcapa8.travesia_natural.tenants.domain.exception.TenantPermissionNotAllowedException;
 import com.corhuila.errorcapa8.travesia_natural.tenants.domain.model.Tenant;
 import com.corhuila.errorcapa8.travesia_natural.tenants.domain.port.in.CreateTenantCommand;
 import com.corhuila.errorcapa8.travesia_natural.tenants.domain.port.in.CreateTenantUseCase;
@@ -12,13 +14,17 @@ import com.corhuila.errorcapa8.travesia_natural.tenants.domain.port.in.Deactivat
 import com.corhuila.errorcapa8.travesia_natural.tenants.domain.port.in.ReactivateTenantCommand;
 import com.corhuila.errorcapa8.travesia_natural.tenants.domain.port.in.ReactivateTenantUseCase;
 import com.corhuila.errorcapa8.travesia_natural.tenants.domain.port.in.TenantQueryUseCase;
+import com.corhuila.errorcapa8.travesia_natural.tenants.domain.port.in.UpdateCollaboratorSupportValidationPermissionCommand;
+import com.corhuila.errorcapa8.travesia_natural.tenants.domain.port.in.UpdateCollaboratorSupportValidationPermissionUseCase;
 import com.corhuila.errorcapa8.travesia_natural.tenants.infrastructure.in.web.dto.CreateTenantRequest;
 import com.corhuila.errorcapa8.travesia_natural.tenants.infrastructure.in.web.dto.TenantLifecycleRequest;
 import com.corhuila.errorcapa8.travesia_natural.tenants.infrastructure.in.web.dto.TenantResponse;
+import com.corhuila.errorcapa8.travesia_natural.tenants.infrastructure.in.web.dto.UpdateCollaboratorSupportValidationPermissionRequest;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -36,15 +42,21 @@ public class TenantController {
     private final DeactivateTenantUseCase deactivateTenantUseCase;
     private final ReactivateTenantUseCase reactivateTenantUseCase;
     private final TenantQueryUseCase tenantQueryUseCase;
+    private final UpdateCollaboratorSupportValidationPermissionUseCase
+            updateCollaboratorSupportValidationPermissionUseCase;
 
     public TenantController(CreateTenantUseCase createTenantUseCase,
                              DeactivateTenantUseCase deactivateTenantUseCase,
                              ReactivateTenantUseCase reactivateTenantUseCase,
-                             TenantQueryUseCase tenantQueryUseCase) {
+                             TenantQueryUseCase tenantQueryUseCase,
+                             UpdateCollaboratorSupportValidationPermissionUseCase
+                                     updateCollaboratorSupportValidationPermissionUseCase) {
         this.createTenantUseCase = createTenantUseCase;
         this.deactivateTenantUseCase = deactivateTenantUseCase;
         this.reactivateTenantUseCase = reactivateTenantUseCase;
         this.tenantQueryUseCase = tenantQueryUseCase;
+        this.updateCollaboratorSupportValidationPermissionUseCase =
+                updateCollaboratorSupportValidationPermissionUseCase;
     }
 
     @PostMapping
@@ -100,6 +112,18 @@ public class TenantController {
         return ResponseEntity.ok(TenantResponse.from(tenantQueryUseCase.getById(tenantId)));
     }
 
+    @PatchMapping("/{tenantId}/collaborator-support-permission")
+    public ResponseEntity<TenantResponse> updateCollaboratorSupportValidationPermission(
+            @PathVariable String tenantId,
+            @RequestBody UpdateCollaboratorSupportValidationPermissionRequest request) {
+        Tenant tenant = updateCollaboratorSupportValidationPermissionUseCase
+                .updateCollaboratorSupportValidationPermission(
+                        new UpdateCollaboratorSupportValidationPermissionCommand(
+                                tenantId, request.actorId(), request.allow()));
+
+        return ResponseEntity.ok(TenantResponse.from(tenant));
+    }
+
     @ExceptionHandler({InvalidTenantException.class, IllegalArgumentException.class})
     public ResponseEntity<ErrorResponse> handleValidationError(RuntimeException ex) {
         return ResponseEntity.badRequest().body(new ErrorResponse("validation_error", ex.getMessage()));
@@ -113,5 +137,16 @@ public class TenantController {
     @ExceptionHandler(TenantNotFoundException.class)
     public ResponseEntity<ErrorResponse> handleNotFound(TenantNotFoundException ex) {
         return ResponseEntity.status(HttpStatus.NOT_FOUND).body(new ErrorResponse("tenant_not_found", ex.getMessage()));
+    }
+
+    @ExceptionHandler(TenantPermissionNotAllowedException.class)
+    public ResponseEntity<ErrorResponse> handlePermissionNotAllowed(TenantPermissionNotAllowedException ex) {
+        return ResponseEntity.status(HttpStatus.FORBIDDEN)
+                .body(new ErrorResponse("tenant_permission_not_allowed", ex.getMessage()));
+    }
+
+    @ExceptionHandler(TenantInactiveException.class)
+    public ResponseEntity<ErrorResponse> handleTenantInactive(TenantInactiveException ex) {
+        return ResponseEntity.status(HttpStatus.CONFLICT).body(new ErrorResponse("tenant_inactive", ex.getMessage()));
     }
 }

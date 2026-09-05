@@ -4,6 +4,7 @@ import com.corhuila.errorcapa8.travesia_natural.common.web.dto.ErrorResponse;
 import com.corhuila.errorcapa8.travesia_natural.reservations.domain.exception.InvalidReservationException;
 import com.corhuila.errorcapa8.travesia_natural.reservations.domain.exception.PaymentAlreadyResolvedException;
 import com.corhuila.errorcapa8.travesia_natural.reservations.domain.exception.ReservationNotFoundException;
+import com.corhuila.errorcapa8.travesia_natural.reservations.domain.exception.SupportValidationNotAllowedException;
 import com.corhuila.errorcapa8.travesia_natural.reservations.domain.model.Reservation;
 import com.corhuila.errorcapa8.travesia_natural.reservations.domain.port.in.DecidePaymentSupportCommand;
 import com.corhuila.errorcapa8.travesia_natural.reservations.domain.port.in.DecidePaymentSupportUseCase;
@@ -134,5 +135,11 @@ public class PaymentController {
     @ExceptionHandler(PaymentAlreadyResolvedException.class)
     public ResponseEntity<ErrorResponse> handlePaymentAlreadyResolved(PaymentAlreadyResolvedException ex) {
         return ResponseEntity.status(HttpStatus.CONFLICT).body(new ErrorResponse("payment_already_resolved", ex.getMessage()));
+    }
+
+    @ExceptionHandler(SupportValidationNotAllowedException.class)
+    public ResponseEntity<ErrorResponse> handleSupportValidationNotAllowed(SupportValidationNotAllowedException ex) {
+        return ResponseEntity.status(HttpStatus.FORBIDDEN)
+                .body(new ErrorResponse("support_validation_not_allowed", ex.getMessage()));
     }
 }
