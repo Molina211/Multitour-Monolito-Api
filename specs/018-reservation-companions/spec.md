@@ -1,6 +1,6 @@
 # 018 — Acompañantes individualizados en la reserva
 
-**Estado:** IMPLEMENTADA
+**Estado:** TERMINADA
 **Fecha:** 2026-09-05
 **Repos afectados:** backend
 **HU relacionada:** ninguna HU formal en el backlog cubre esto punto por punto; se basa en

@@ -1,6 +1,9 @@
 # 020 — Habilitación por tenant de validación de soportes por Colaborador operativo
 
-**Estado:** APROBADA
+**Estado:** TERMINADA — implementada y verificada end-to-end el 2026-09-05, incluidos
+2 hallazgos de `/code-review` ya corregidos (NPE por `actorId` nulo, tenant `Inactivo`
+sin bloquear el cambio de permiso). Ver `PLAN-VERIFICACION.md`, sección "020". Deuda
+conocida documentada ahí mismo: ni esta spec ni la 019 validan `membershipStatus`.
 **Fecha:** 2026-09-05
 **Repos afectados:** backend
 **HU relacionada:** ninguna HU formal en el backlog; se basa en el PDR
@@ -46,19 +49,19 @@ sin importar si es Administrador o Colaborador.
 
 ## Criterios de aceptación
 
-- [ ] Con el parámetro deshabilitado (valor por defecto de un tenant nuevo), un `actorId`
+- [x] Con el parámetro deshabilitado (valor por defecto de un tenant nuevo), un `actorId`
       con rol `OPERATIONAL_COLLABORATOR` que intenta `decide-support` recibe `403` y la
       reserva no cambia de estado.
-- [ ] Con el parámetro habilitado, el mismo Colaborador puede aprobar o rechazar el soporte,
+- [x] Con el parámetro habilitado, el mismo Colaborador puede aprobar o rechazar el soporte,
       igual que hoy.
-- [ ] Un `actorId` con rol `ADMINISTRATOR` siempre puede decidir, sin importar el valor del
+- [x] Un `actorId` con rol `ADMINISTRATOR` siempre puede decidir, sin importar el valor del
       parámetro.
-- [ ] Activar o desactivar el parámetro solo lo puede hacer un `actorId` con rol
+- [x] Activar o desactivar el parámetro solo lo puede hacer un `actorId` con rol
       `ADMINISTRATOR` del mismo tenant; el intento con cualquier otro rol devuelve `403`.
-- [ ] Cada cambio del parámetro queda auditado con actor, fecha y valor nuevo.
-- [ ] Un `actorId` que no existe, o que pertenece a otro tenant, devuelve `404`/`403` en vez
+- [x] Cada cambio del parámetro queda auditado con actor, fecha y valor nuevo.
+- [x] Un `actorId` que no existe, o que pertenece a otro tenant, devuelve `404`/`403` en vez
       de ejecutar la decisión de soporte.
-- [ ] El proyecto compila y las specs 001-019 siguen pasando.
+- [x] El proyecto compila y las specs 001-019 siguen pasando.
 
 ## Impacto en multitenencia
 

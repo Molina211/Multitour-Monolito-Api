@@ -1,6 +1,7 @@
 # 021 — Completar campos de trazabilidad de `AuditRecord` (previousValue, newValue, canal, proceso funcional)
 
-**Estado:** APROBADA
+**Estado:** TERMINADA — implementada y verificada end-to-end el 2026-09-05. Ver
+`PLAN-VERIFICACION.md`, sección "021".
 **Fecha:** 2026-09-05
 **Repos afectados:** backend
 **HU relacionada:** ninguna HU formal en el backlog; cierra una brecha entre el Backend y
@@ -47,15 +48,15 @@ más un campo `actorRole` que Docs no contempla.
 
 ## Criterios de aceptación
 
-- [ ] `AuditRecord` acepta y persiste `previousValue`, `newValue`, `channelOrModule` y
+- [x] `AuditRecord` acepta y persiste `previousValue`, `newValue`, `channelOrModule` y
       `functionalProcessReference` como campos opcionales.
-- [ ] `GET /api/audit` devuelve los cuatro campos nuevos (`null` cuando no se informaron).
-- [ ] Activar o desactivar un `Tenant` (`TenantController`) registra `previousValue` y
+- [x] `GET /api/audit` devuelve los cuatro campos nuevos (`null` cuando no se informaron).
+- [x] Activar o desactivar un `Tenant` (`TenantController`) registra `previousValue` y
       `newValue` reales del estado (ej. `Activo` → `Inactivo`), como caso de uso de
       ejemplo de los campos nuevos.
-- [ ] Los registros de auditoría creados antes de esta spec se siguen leyendo sin error,
+- [x] Los registros de auditoría creados antes de esta spec se siguen leyendo sin error,
       con los campos nuevos en `null`.
-- [ ] El proyecto compila y las specs 001-020 siguen pasando.
+- [x] El proyecto compila y las specs 001-020 siguen pasando.
 
 ## Impacto en multitenencia
 
