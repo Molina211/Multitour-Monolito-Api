@@ -7,5 +7,5 @@ import java.time.LocalDate;
 
 public record CatalogItemRequest(CatalogItemType type, String name, BigDecimal price, Integer capacity,
                                   String restrictions, LocalDate validFrom, LocalDate validTo, String policy,
-                                  String image) {
+                                  String image, String route, BigDecimal operationalCost) {
 }

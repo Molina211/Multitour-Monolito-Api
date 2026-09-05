@@ -2071,3 +2071,86 @@ antes de levantar la app. Los 7 pasos de `curl` (registro, duplicado, password d
 listado, detalle sin `passwordHash`, login con `role: OPERATIONAL_COLLABORATOR`,
 aislamiento cruzado con `404 collaborator_not_found`) devolvieron los códigos HTTP y
 payloads exactos documentados arriba.
+
+## Spec 015 — Tipo de catálogo Transporte
+
+Agrega `TRANSPORT` a `CatalogItemType` y dos campos opcionales (`route`,
+`operationalCost`) a `CatalogItem`, reutilizando el CRUD-lite de spec 005 sin
+endpoints nuevos. Migración `V13__add_transport_fields_to_catalog_items.sql`.
+
+### 1. Compilación y tests
+
+```bash
+./mvnw test
+```
+
+Debe migrar a la versión 13 (`add transport fields to catalog items`) y mantener
+`contextLoads` en verde.
+
+### 2. Crear un tenant activo para las pruebas
+
+```bash
+curl -X POST http://localhost:8080/api/tenants \
+  -H "Content-Type: application/json" \
+  -d '{
+    "tenantId": "spec015-transport-demo",
+    "commercialName": "Spec015 Transport Demo",
+    "actorId": "system-test",
+    "administrator": {
+      "name": "Admin Spec015",
+      "email": "admin@spec015-transport-demo.test",
+      "password": "Passw0rd!123",
+      "passwordConfirmation": "Passw0rd!123"
+    }
+  }'
+```
+
+### 3. Crear TRANSPORT sin campos opcionales
+
+```bash
+curl -X POST http://localhost:8080/api/tenants/spec015-transport-demo/catalog-items \
+  -H "Content-Type: application/json" \
+  -d '{"type": "TRANSPORT", "name": "Ruta Neiva - San Agustin", "price": 45000}'
+```
+
+Debe devolver `201` con `capacity`, `route` y `operationalCost` en `null`.
+
+### 4. Round-trip de route/operationalCost
+
+Crear un ítem `TRANSPORT` con `route`/`operationalCost` y consultarlo por
+`GET /{itemId}`: ambos valores deben devolverse tal cual se guardaron.
+
+### 5. PATCH parcial
+
+`PATCH` solo `route` sobre el ítem anterior: el `GET` posterior debe conservar
+`operationalCost` y el resto de campos sin cambios.
+
+### 6. Regresión de capacity en LODGING
+
+```bash
+curl -X POST http://localhost:8080/api/tenants/spec015-transport-demo/catalog-items \
+  -H "Content-Type: application/json" \
+  -d '{"type": "LODGING", "name": "Cabana Rio Magdalena", "price": 150000}'
+```
+
+Debe seguir devolviendo `400 validation_error` ("capacity is required and must be
+positive for LODGING items") — TRANSPORT no debilita esa regla.
+
+### 7. Criterios ya cubiertos por spec 005, contra un ítem TRANSPORT
+
+- Tenant inexistente → `404 not_found`.
+- Segundo tenant: el ítem del primero no aparece en su lista y su `GET /{itemId}`
+  devuelve `404` (aislamiento).
+- `deactivate` → `200`, `active: false`; `deactivate` de nuevo → `400
+  validation_error` ("already inactive"); `reactivate` → `200`, `active: true`.
+- Tenant `Inactivo` → `POST` de un ítem `TRANSPORT` nuevo devuelve `409
+  tenant_inactive`.
+
+Ejecutado el 2026-09-04 contra la base de desarrollo local (mismo Postgres
+`multitour-postgres`, tenants `spec015-transport-demo` y
+`spec015-transport-demo-2`, datos sintéticos, sin afectar tenants reales).
+`./mvnw test` en verde (`contextLoads`, migración a versión 13 confirmada) antes de
+levantar la app. Los 7 pasos de `curl` de esta sección (creación sin opcionales,
+round-trip route/operationalCost, PATCH parcial, regresión LODGING, tenant
+inexistente, aislamiento entre tenants, soft delete/reactivate, tenant inactivo)
+devolvieron los códigos HTTP y payloads exactos documentados arriba.

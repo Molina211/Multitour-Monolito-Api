@@ -9,5 +9,6 @@ import java.time.LocalDate;
  * own migration rule for existing capacity/price data, which no screen or HU asks for.
  */
 public record CatalogItemPatchRequest(String name, BigDecimal price, Integer capacity, String restrictions,
-                                       LocalDate validFrom, LocalDate validTo, String policy, String image) {
+                                       LocalDate validFrom, LocalDate validTo, String policy, String image,
+                                       String route, BigDecimal operationalCost) {
 }

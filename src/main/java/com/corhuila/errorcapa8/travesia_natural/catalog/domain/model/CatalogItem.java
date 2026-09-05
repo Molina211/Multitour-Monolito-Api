@@ -9,10 +9,11 @@ import java.util.UUID;
 
 /**
  * Aggregate root for the Operational Catalog bounded context (spec 005, HU-CAT-001).
- * A single entity covers TOUR, LODGING and FOOD (discriminated by {@code type}) instead
- * of three near-identical classes — same criterion already used for Membership's roles.
- * Transport (RN-TRA-001/002) is out of scope: the Frontend itself excludes it from this
- * management block.
+ * A single entity covers TOUR, LODGING, FOOD and TRANSPORT (discriminated by
+ * {@code type}) instead of near-identical classes — same criterion already used for
+ * Membership's roles. TRANSPORT was added in spec 015 once the Frontend shipped real
+ * screens for it; {@code route}/{@code operationalCost} only apply to that type, but
+ * are left unvalidated for the others (nobody requires that guard yet).
  */
 public final class CatalogItem {
 
@@ -27,12 +28,15 @@ public final class CatalogItem {
     private final LocalDate validTo;
     private final String policy;
     private final String image;
+    private final String route;
+    private final BigDecimal operationalCost;
     private final boolean active;
     private final Instant createdAt;
 
     private CatalogItem(UUID catalogItemId, String tenantId, CatalogItemType type, String name, BigDecimal price,
                          Integer capacity, String restrictions, LocalDate validFrom, LocalDate validTo,
-                         String policy, String image, boolean active, Instant createdAt) {
+                         String policy, String image, String route, BigDecimal operationalCost, boolean active,
+                         Instant createdAt) {
         this.catalogItemId = catalogItemId;
         this.tenantId = tenantId;
         this.type = type;
@@ -44,6 +48,8 @@ public final class CatalogItem {
         this.validTo = validTo;
         this.policy = policy;
         this.image = image;
+        this.route = route;
+        this.operationalCost = operationalCost;
         this.active = active;
         this.createdAt = createdAt;
     }
@@ -55,7 +61,7 @@ public final class CatalogItem {
      */
     public static CatalogItem create(String tenantId, CatalogItemType type, String name, BigDecimal price,
                                       Integer capacity, String restrictions, LocalDate validFrom, LocalDate validTo,
-                                      String policy, String image) {
+                                      String policy, String image, String route, BigDecimal operationalCost) {
         if (tenantId == null || tenantId.isBlank()) {
             throw new InvalidCatalogItemException("tenantId is required");
         }
@@ -71,7 +77,7 @@ public final class CatalogItem {
         validateCapacity(type, capacity);
 
         return new CatalogItem(UUID.randomUUID(), tenantId, type, name, price, capacity, restrictions, validFrom,
-                validTo, policy, image, true, Instant.now());
+                validTo, policy, image, route, operationalCost, true, Instant.now());
     }
 
     /**
@@ -81,9 +87,10 @@ public final class CatalogItem {
     public static CatalogItem reconstitute(UUID catalogItemId, String tenantId, CatalogItemType type, String name,
                                             BigDecimal price, Integer capacity, String restrictions,
                                             LocalDate validFrom, LocalDate validTo, String policy, String image,
-                                            boolean active, Instant createdAt) {
+                                            String route, BigDecimal operationalCost, boolean active,
+                                            Instant createdAt) {
         return new CatalogItem(catalogItemId, tenantId, type, name, price, capacity, restrictions, validFrom,
-                validTo, policy, image, active, createdAt);
+                validTo, policy, image, route, operationalCost, active, createdAt);
     }
 
     /**
@@ -92,7 +99,8 @@ public final class CatalogItem {
      * that clears the capacity of a LODGING item is rejected).
      */
     public CatalogItem update(String name, BigDecimal price, Integer capacity, String restrictions,
-                               LocalDate validFrom, LocalDate validTo, String policy, String image) {
+                               LocalDate validFrom, LocalDate validTo, String policy, String image, String route,
+                               BigDecimal operationalCost) {
         String newName = name != null ? name : this.name;
         BigDecimal newPrice = price != null ? price : this.price;
         Integer newCapacity = capacity != null ? capacity : this.capacity;
@@ -101,6 +109,8 @@ public final class CatalogItem {
         LocalDate newValidTo = validTo != null ? validTo : this.validTo;
         String newPolicy = policy != null ? policy : this.policy;
         String newImage = image != null ? image : this.image;
+        String newRoute = route != null ? route : this.route;
+        BigDecimal newOperationalCost = operationalCost != null ? operationalCost : this.operationalCost;
 
         if (newName.isBlank()) {
             throw new InvalidCatalogItemException("name is required");
@@ -108,7 +118,7 @@ public final class CatalogItem {
         validateCapacity(type, newCapacity);
 
         return new CatalogItem(catalogItemId, tenantId, type, newName, newPrice, newCapacity, newRestrictions,
-                newValidFrom, newValidTo, newPolicy, newImage, active, createdAt);
+                newValidFrom, newValidTo, newPolicy, newImage, newRoute, newOperationalCost, active, createdAt);
     }
 
     /**
@@ -120,7 +130,7 @@ public final class CatalogItem {
             throw new InvalidCatalogItemException("catalog item is already inactive: " + catalogItemId);
         }
         return new CatalogItem(catalogItemId, tenantId, type, name, price, capacity, restrictions, validFrom,
-                validTo, policy, image, false, createdAt);
+                validTo, policy, image, route, operationalCost, false, createdAt);
     }
 
     /**
@@ -132,7 +142,7 @@ public final class CatalogItem {
             throw new InvalidCatalogItemException("catalog item is already active: " + catalogItemId);
         }
         return new CatalogItem(catalogItemId, tenantId, type, name, price, capacity, restrictions, validFrom,
-                validTo, policy, image, true, createdAt);
+                validTo, policy, image, route, operationalCost, true, createdAt);
     }
 
     private static void validateCapacity(CatalogItemType type, Integer capacity) {
@@ -183,6 +193,14 @@ public final class CatalogItem {
 
     public String image() {
         return image;
+    }
+
+    public String route() {
+        return route;
+    }
+
+    public BigDecimal operationalCost() {
+        return operationalCost;
     }
 
     public boolean active() {

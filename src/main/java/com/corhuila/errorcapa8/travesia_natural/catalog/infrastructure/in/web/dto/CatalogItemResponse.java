@@ -9,7 +9,8 @@ import java.util.UUID;
 
 public record CatalogItemResponse(UUID catalogItemId, String tenantId, String type, String name, BigDecimal price,
                                    Integer capacity, String restrictions, LocalDate validFrom, LocalDate validTo,
-                                   String policy, String image, boolean active, Instant createdAt) {
+                                   String policy, String image, String route, BigDecimal operationalCost,
+                                   boolean active, Instant createdAt) {
 
     public static CatalogItemResponse from(CatalogItem catalogItem) {
         return new CatalogItemResponse(
@@ -24,6 +25,8 @@ public record CatalogItemResponse(UUID catalogItemId, String tenantId, String ty
                 catalogItem.validTo(),
                 catalogItem.policy(),
                 catalogItem.image(),
+                catalogItem.route(),
+                catalogItem.operationalCost(),
                 catalogItem.active(),
                 catalogItem.createdAt());
     }

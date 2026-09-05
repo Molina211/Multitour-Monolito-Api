@@ -48,6 +48,12 @@ public class CatalogItemEntity {
     @Column(name = "image")
     private String image;
 
+    @Column(name = "route")
+    private String route;
+
+    @Column(name = "operational_cost")
+    private BigDecimal operationalCost;
+
     @Column(name = "active", nullable = false)
     private boolean active;
 
@@ -60,7 +66,8 @@ public class CatalogItemEntity {
 
     public CatalogItemEntity(UUID catalogItemId, String tenantId, String itemType, String name, BigDecimal price,
                               Integer capacity, String restrictions, LocalDate validFrom, LocalDate validTo,
-                              String policy, String image, boolean active, Instant createdAt) {
+                              String policy, String image, String route, BigDecimal operationalCost, boolean active,
+                              Instant createdAt) {
         this.catalogItemId = catalogItemId;
         this.tenantId = tenantId;
         this.itemType = itemType;
@@ -72,6 +79,8 @@ public class CatalogItemEntity {
         this.validTo = validTo;
         this.policy = policy;
         this.image = image;
+        this.route = route;
+        this.operationalCost = operationalCost;
         this.active = active;
         this.createdAt = createdAt;
     }
@@ -118,6 +127,14 @@ public class CatalogItemEntity {
 
     public String getImage() {
         return image;
+    }
+
+    public String getRoute() {
+        return route;
+    }
+
+    public BigDecimal getOperationalCost() {
+        return operationalCost;
     }
 
     public boolean isActive() {
