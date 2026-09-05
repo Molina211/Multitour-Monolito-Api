@@ -13,4 +13,6 @@ public interface ReservationRepositoryPort {
     Optional<Reservation> findByTenantIdAndReservationId(String tenantId, UUID reservationId);
 
     List<Reservation> findAllByTenantId(String tenantId);
+
+    List<Reservation> findAllByTenantIdAndCustomerId(String tenantId, String customerId);
 }

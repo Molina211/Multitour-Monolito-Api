@@ -1852,9 +1852,11 @@ curl -i -X POST http://localhost:8080/api/tenants/travesia-natural/cash/${CASH_I
   -d '{ "type": null, "amount": 1000, "concept": "tipo null", "actorId": "admin-1" }'
 ```
 
-Ambas deben devolver `400` con `{"error":"validation_error","message":"movement type is
-required"}`. Un `type` inexistente en el enum (ej. `"FOO"`) debe seguir devolviendo
-`400` con el mensaje de `IllegalArgumentException` (ese caso ya funcionaba antes).
+Ambas deben devolver `400` con `{"error":"validation_error","message":"Unknown
+CashMovementType label: null"}` — mensaje actualizado tras el cambio a `fromLabel()`
+(ver sección más abajo, "Alineación de `CashMovementType` con el contrato del
+Frontend"). Un `type` inexistente (ej. `"FOO"`) debe seguir devolviendo `400` con el
+mismo tipo de mensaje (`"Unknown CashMovementType label: FOO"`).
 
 ## 2. Consolidación mensual sigue devolviendo los mismos valores
 
@@ -1874,3 +1876,398 @@ petición.
 ```
 
 Deben seguir en verde `contextLoads` y los tests existentes, sin regresiones.
+
+# Plan de verificación — Alineación de `CashMovementType` con el contrato del Frontend
+
+Hallazgo de `/code-review`: el enum `CashMovementType` (`INGRESO`/`PAGO`/`GASTO`) no
+coincidía con los literales que ya usa `operator-cash.service.ts` en la rama `develop`
+del Frontend (`'Ingreso'`/`'Pago operacional'`/`'Gasto'`/`'Devolución'`, sin integración
+HTTP todavía — trabajo de Fernanda Robayo, ver regla 11 de CLAUDE.md, solo lectura).
+Decisión: hasta que Backend y Frontend completen su implementación por separado, no debe
+haber ningún llamado HTTP real entre ambos; mientras tanto, se alinea el Backend al
+contrato ya definido en el Frontend para evitar el desfase cuando llegue la integración.
+
+Se aplicó el mismo patrón `label()`/`fromLabel()` que ya usan `ReservationStatus` y
+`PaymentStatus`: el enum interno de Java conserva sus constantes (`INGRESO`, `PAGO`,
+`GASTO`), pero expone/acepta el literal en español como valor de intercambio (JSON y
+columna `type` en `cash_movements`). No se agrega `DEVOLUCION`: sigue sin registrarse a
+mano, se calcula en vivo desde las devoluciones ejecutadas (spec 012), igual que antes.
+No se tocó ningún archivo del Frontend.
+
+Efecto colateral: las filas de prueba de esta sesión en la base de desarrollo
+(`cash_movements.type` en formato `INGRESO`/`PAGO`/`GASTO`) se migraron a mano a
+`Ingreso`/`Pago operacional`/`Gasto` vía `UPDATE` directo (dato sintético de pruebas
+propias, no hay entorno productivo ni datos de terceros afectados).
+
+## 1. Movimiento con el literal del Frontend es aceptado
+
+```bash
+CASH_ID=$(curl -s -X POST http://localhost:8080/api/tenants/travesia-natural/cash \
+  -H "Content-Type: application/json" \
+  -d '{ "businessDate": "2026-09-11", "baseAmount": 5000, "actorId": "admin-1" }' \
+  | grep -o '"cashRegisterId":"[^"]*"' | cut -d'"' -f4)
+
+curl -i -X POST http://localhost:8080/api/tenants/travesia-natural/cash/${CASH_ID}/movements \
+  -H "Content-Type: application/json" \
+  -d '{ "type": "Ingreso", "amount": 1000, "concept": "prueba", "actorId": "admin-1" }'
+
+curl -i -X POST http://localhost:8080/api/tenants/travesia-natural/cash/${CASH_ID}/movements \
+  -H "Content-Type: application/json" \
+  -d '{ "type": "Pago operacional", "amount": 200, "concept": "prueba", "actorId": "admin-1" }'
+
+curl -s "http://localhost:8080/api/tenants/travesia-natural/cash?businessDate=2026-09-11"
+```
+
+Ambos `POST` devuelven `201`. La consulta final debe mostrar `movements[].type` como
+`"Ingreso"` y `"Pago operacional"` (no `"INGRESO"`/`"PAGO"`).
+
+## 2. El formato viejo (nombre del enum de Java) ya no es válido
+
+```bash
+curl -i -X POST http://localhost:8080/api/tenants/travesia-natural/cash/${CASH_ID}/movements \
+  -H "Content-Type: application/json" \
+  -d '{ "type": "INGRESO", "amount": 100, "concept": "formato viejo", "actorId": "admin-1" }'
+```
+
+Debe devolver `400` (`"Unknown CashMovementType label: INGRESO"`) — señal de que ya no
+conviven dos formatos distintos para el mismo dato.
+
+## 3. Historial y consolidación siguen leyendo sin error tras la migración de datos
+
+```bash
+curl -s http://localhost:8080/api/tenants/travesia-natural/cash/history
+curl -s "http://localhost:8080/api/tenants/travesia-natural/cash/consolidation?period=2026-09"
+```
+
+Ambos deben seguir devolviendo `200 OK`, incluyendo las jornadas cerradas con
+movimientos migrados al nuevo formato.
+
+## 4. Compilación y tests
+
+```bash
+./mvnw test
+```
+
+Deben seguir en verde `contextLoads` y los tests existentes, sin regresiones.
+
+# Plan de verificación — Spec 014: Registro y consulta de colaboradores operativos
+
+Cierra una de las 20 brechas confirmadas en el análisis Backend-vs-PDR del 2026-09-04:
+`MembershipRole.OPERATIONAL_COLLABORATOR` existía en el enum desde spec 002 sin ningún
+caso de uso que lo asignara. El Frontend (rama `develop`, push de Fernanda Robayo del
+2026-09-03/04, ver regla 11 de CLAUDE.md, solo lectura) ya tiene pantallas reales
+(`collaborators`, `collaborators/new`, `collaborators/detail`) corriendo en simulación
+local. No hay integración HTTP real todavía (decisión vigente: sin llamadas HTTP entre
+Backend y Frontend hasta que ambos módulos estén completos); esta verificación es
+enteramente vía `curl` contra el Backend en aislamiento.
+
+Reutiliza el patrón ya existente de `Membership`/`RegisterCustomerService`/
+`CreateTenantService`: mismo `PasswordPolicy`, mismo `EmailAlreadyRegisteredException`,
+mismo `AuditRecorder`. El campo "nombre completo" del Frontend se guarda en
+`firstName` (`lastName` queda `null`, igual que en Administrator) — sin migración de
+esquema, la tabla `memberships` ya es genérica. El toggle "colaborador puede validar
+soportes de transferencia" (PDR línea 115) quedó fuera de esta spec a propósito (ver
+spec.md, "Fuera de alcance" y decisión abierta 2).
+
+## 1. Crear un tenant + Administrator de prueba
+
+```bash
+curl -s -X POST http://localhost:8080/api/tenants \
+  -H "Content-Type: application/json" \
+  -d '{ "tenantId": "spec014-collab-demo", "commercialName": "Spec 014 Demo",
+        "administrator": { "email": "admin@spec014.test", "password": "Admin123!",
+        "passwordConfirmation": "Admin123!" }, "actorId": "platform-admin" }'
+```
+
+Debe devolver `201` con `tenantStatus: "ACTIVO"`.
+
+## 2. Registrar un colaborador válido (`201`)
+
+```bash
+curl -i -X POST http://localhost:8080/api/tenants/spec014-collab-demo/collaborators \
+  -H "Content-Type: application/json" \
+  -d '{ "name": "Laura Perez", "email": "laura@spec014.test", "password": "Colab123!",
+        "passwordConfirmation": "Colab123!", "actorId": "admin@spec014.test" }'
+```
+
+Debe devolver `201` con `role: "OPERATIONAL_COLLABORATOR"`, `name: "Laura Perez"` y sin
+ningún campo de contraseña en la respuesta.
+
+## 3. Rechazo por correo duplicado en el mismo tenant (`409`)
+
+```bash
+curl -i -X POST http://localhost:8080/api/tenants/spec014-collab-demo/collaborators \
+  -H "Content-Type: application/json" \
+  -d '{ "name": "Otra Laura", "email": "laura@spec014.test", "password": "Colab123!",
+        "passwordConfirmation": "Colab123!", "actorId": "admin@spec014.test" }'
+```
+
+Debe devolver `409` (`"email_already_registered"`).
+
+## 4. Rechazo por política de contraseña incumplida (`400`)
+
+```bash
+curl -i -X POST http://localhost:8080/api/tenants/spec014-collab-demo/collaborators \
+  -H "Content-Type: application/json" \
+  -d '{ "name": "Otro Nombre", "email": "debil@spec014.test", "password": "123",
+        "passwordConfirmation": "123", "actorId": "admin@spec014.test" }'
+```
+
+Debe devolver `400` (`"validation_error"`, mensaje de `PasswordPolicy`).
+
+## 5. Listado y detalle del colaborador (`200`, sin `passwordHash`)
+
+```bash
+curl -s http://localhost:8080/api/tenants/spec014-collab-demo/collaborators
+
+MEMBERSHIP_ID="<el membershipId devuelto en el paso 2>"
+curl -s http://localhost:8080/api/tenants/spec014-collab-demo/collaborators/${MEMBERSHIP_ID}
+```
+
+El listado debe incluir a Laura con `name`/`email`/`role`. El detalle debe traer los
+mismos datos, sin ningún campo `passwordHash` en el JSON.
+
+## 6. Login del colaborador recién registrado (`200`, JWT con su rol)
+
+```bash
+curl -s -X POST http://localhost:8080/api/tenants/spec014-collab-demo/login \
+  -H "Content-Type: application/json" \
+  -d '{ "email": "laura@spec014.test", "password": "Colab123!" }'
+```
+
+Debe devolver `200` con `accessToken` y `role: "OPERATIONAL_COLLABORATOR"` — sin
+cambios en `LoginService`, ya era agnóstico al rol.
+
+## 7. Aislamiento entre tenants (`200` vacío, `404` cruzado)
+
+```bash
+curl -s -X POST http://localhost:8080/api/tenants \
+  -H "Content-Type: application/json" \
+  -d '{ "tenantId": "spec014-collab-demo-2", "commercialName": "Spec 014 Aislamiento",
+        "administrator": { "email": "admin2@spec014.test", "password": "Admin123!",
+        "passwordConfirmation": "Admin123!" }, "actorId": "platform-admin" }'
+
+curl -s http://localhost:8080/api/tenants/spec014-collab-demo-2/collaborators
+
+curl -i http://localhost:8080/api/tenants/spec014-collab-demo-2/collaborators/${MEMBERSHIP_ID}
+```
+
+El listado del segundo tenant debe venir vacío (`[]`). Consultar el detalle del
+colaborador del primer tenant desde el segundo debe devolver `404`
+(`"collaborator_not_found"`), no `200` con datos ajenos.
+
+## 8. Compilación y tests
+
+```bash
+./mvnw test
+```
+
+Deben seguir en verde `contextLoads` y los tests existentes, sin regresiones.
+
+Ejecutado el 2026-09-04 contra la base de desarrollo local (Postgres en `multitour-postgres`,
+tenants `spec014-collab-demo` y `spec014-collab-demo-2`, datos sintéticos de prueba, sin
+afectar tenants reales). `./mvnw test` en verde (`contextLoads`, 12 migraciones validadas)
+antes de levantar la app. Los 7 pasos de `curl` (registro, duplicado, password débil,
+listado, detalle sin `passwordHash`, login con `role: OPERATIONAL_COLLABORATOR`,
+aislamiento cruzado con `404 collaborator_not_found`) devolvieron los códigos HTTP y
+payloads exactos documentados arriba.
+
+## Spec 015 — Tipo de catálogo Transporte
+
+Agrega `TRANSPORT` a `CatalogItemType` y dos campos opcionales (`route`,
+`operationalCost`) a `CatalogItem`, reutilizando el CRUD-lite de spec 005 sin
+endpoints nuevos. Migración `V13__add_transport_fields_to_catalog_items.sql`.
+
+### 1. Compilación y tests
+
+```bash
+./mvnw test
+```
+
+Debe migrar a la versión 13 (`add transport fields to catalog items`) y mantener
+`contextLoads` en verde.
+
+### 2. Crear un tenant activo para las pruebas
+
+```bash
+curl -X POST http://localhost:8080/api/tenants \
+  -H "Content-Type: application/json" \
+  -d '{
+    "tenantId": "spec015-transport-demo",
+    "commercialName": "Spec015 Transport Demo",
+    "actorId": "system-test",
+    "administrator": {
+      "name": "Admin Spec015",
+      "email": "admin@spec015-transport-demo.test",
+      "password": "Passw0rd!123",
+      "passwordConfirmation": "Passw0rd!123"
+    }
+  }'
+```
+
+### 3. Crear TRANSPORT sin campos opcionales
+
+```bash
+curl -X POST http://localhost:8080/api/tenants/spec015-transport-demo/catalog-items \
+  -H "Content-Type: application/json" \
+  -d '{"type": "TRANSPORT", "name": "Ruta Neiva - San Agustin", "price": 45000}'
+```
+
+Debe devolver `201` con `capacity`, `route` y `operationalCost` en `null`.
+
+### 4. Round-trip de route/operationalCost
+
+Crear un ítem `TRANSPORT` con `route`/`operationalCost` y consultarlo por
+`GET /{itemId}`: ambos valores deben devolverse tal cual se guardaron.
+
+### 5. PATCH parcial
+
+`PATCH` solo `route` sobre el ítem anterior: el `GET` posterior debe conservar
+`operationalCost` y el resto de campos sin cambios.
+
+### 6. Regresión de capacity en LODGING
+
+```bash
+curl -X POST http://localhost:8080/api/tenants/spec015-transport-demo/catalog-items \
+  -H "Content-Type: application/json" \
+  -d '{"type": "LODGING", "name": "Cabana Rio Magdalena", "price": 150000}'
+```
+
+Debe seguir devolviendo `400 validation_error` ("capacity is required and must be
+positive for LODGING items") — TRANSPORT no debilita esa regla.
+
+### 7. Criterios ya cubiertos por spec 005, contra un ítem TRANSPORT
+
+- Tenant inexistente → `404 not_found`.
+- Segundo tenant: el ítem del primero no aparece en su lista y su `GET /{itemId}`
+  devuelve `404` (aislamiento).
+- `deactivate` → `200`, `active: false`; `deactivate` de nuevo → `400
+  validation_error` ("already inactive"); `reactivate` → `200`, `active: true`.
+- Tenant `Inactivo` → `POST` de un ítem `TRANSPORT` nuevo devuelve `409
+  tenant_inactive`.
+
+Ejecutado el 2026-09-04 contra la base de desarrollo local (mismo Postgres
+`multitour-postgres`, tenants `spec015-transport-demo` y
+`spec015-transport-demo-2`, datos sintéticos, sin afectar tenants reales).
+`./mvnw test` en verde (`contextLoads`, migración a versión 13 confirmada) antes de
+levantar la app. Los 7 pasos de `curl` de esta sección (creación sin opcionales,
+round-trip route/operationalCost, PATCH parcial, regresión LODGING, tenant
+inexistente, aislamiento entre tenants, soft delete/reactivate, tenant inactivo)
+devolvieron los códigos HTTP y payloads exactos documentados arriba.
+
+## Spec 016 — Aislamiento de reservas por Cliente
+
+Agrega `GET .../reservations/me` y `GET .../reservations/me/{reservationId}`,
+protegidos con JWT, que filtran por el `customerId` (`membershipId` del token) del
+llamante. No toca los endpoints públicos existentes `GET .../reservations` (Staff,
+sin filtrar) ni `GET .../reservations/{reservationId}`.
+
+### 1. Compilación y tests
+
+```bash
+./mvnw test
+```
+
+Debe mantener `contextLoads` en verde (no hay migración nueva en esta spec).
+
+### 2. Crear un tenant activo y dos End Customers distintos
+
+```bash
+curl -X POST http://localhost:8080/api/tenants \
+  -H "Content-Type: application/json" \
+  -d '{
+    "tenantId": "spec016-reservas-demo",
+    "commercialName": "Spec016 Reservas Demo",
+    "actorId": "system-test",
+    "administrator": {
+      "name": "Admin Spec016",
+      "email": "admin@spec016-reservas-demo.test",
+      "password": "Passw0rd!123",
+      "passwordConfirmation": "Passw0rd!123"
+    }
+  }'
+
+curl -X POST http://localhost:8080/api/tenants/spec016-reservas-demo/customers \
+  -H "Content-Type: application/json" \
+  -d '{"firstName":"Cliente","lastName":"A","email":"clientea@spec016.test","phone":"3000000001","password":"Passw0rd!123","passwordConfirmation":"Passw0rd!123"}'
+
+curl -X POST http://localhost:8080/api/tenants/spec016-reservas-demo/customers \
+  -H "Content-Type: application/json" \
+  -d '{"firstName":"Cliente","lastName":"B","email":"clienteb@spec016.test","phone":"3000000002","password":"Passw0rd!123","passwordConfirmation":"Passw0rd!123"}'
+```
+
+Login de cada uno (`POST .../login`) para obtener `TOKEN_A`/`TOKEN_B` con
+`membershipId` distinto.
+
+### 3. Cada Cliente crea su propia reserva
+
+```bash
+curl -X POST http://localhost:8080/api/tenants/spec016-reservas-demo/reservations \
+  -H "Content-Type: application/json" -H "Authorization: Bearer ${TOKEN_A}" \
+  -d '{"projectedValue": 150000, "reservedServices": [{"serviceReference": "tour-demo-1", "partySize": 2, "scheduledDate": "2026-10-01"}]}'
+
+curl -X POST http://localhost:8080/api/tenants/spec016-reservas-demo/reservations \
+  -H "Content-Type: application/json" -H "Authorization: Bearer ${TOKEN_B}" \
+  -d '{"projectedValue": 200000, "reservedServices": [{"serviceReference": "tour-demo-2", "partySize": 1, "scheduledDate": "2026-10-02"}]}'
+```
+
+Guardar `RES_A`/`RES_B` de cada respuesta.
+
+### 4. `GET .../reservations/me` filtra por Cliente
+
+```bash
+curl -s http://localhost:8080/api/tenants/spec016-reservas-demo/reservations/me \
+  -H "Authorization: Bearer ${TOKEN_A}"
+```
+
+Debe devolver únicamente `RES_A`, nunca `RES_B`.
+
+### 5. Lista vacía para un Cliente sin reservas
+
+Registrar y loguear un tercer Cliente (`clientec@spec016.test`, sin crear ninguna
+reserva) y repetir el paso 4 con su token: debe devolver `[]`.
+
+### 6. Sin token → `401`
+
+```bash
+curl -s -o /dev/null -w "%{http_code}\n" http://localhost:8080/api/tenants/spec016-reservas-demo/reservations/me
+```
+
+Debe devolver `401`.
+
+### 7. Detalle de la reserva ajena por `/me/{id}` → `404`
+
+```bash
+curl -s -o /dev/null -w "%{http_code}\n" http://localhost:8080/api/tenants/spec016-reservas-demo/reservations/me/${RES_B} \
+  -H "Authorization: Bearer ${TOKEN_A}"
+```
+
+Cliente A pidiendo la reserva de Cliente B debe devolver `404` (mismo patrón de
+404 unificado que spec 014, nunca revela que la reserva existe).
+
+### 8. Token de otro tenant → `403 tenant_mismatch`
+
+```bash
+curl -s -w "\nHTTP:%{http_code}\n" http://localhost:8080/api/tenants/otro-tenant-cualquiera/reservations/me \
+  -H "Authorization: Bearer ${TOKEN_A}"
+```
+
+Debe devolver `403` con `{"error":"tenant_mismatch", ...}`.
+
+### 9. Regresión: `GET .../reservations` (Staff, sin autenticación) sigue sin filtrar
+
+```bash
+curl -s http://localhost:8080/api/tenants/spec016-reservas-demo/reservations
+```
+
+Debe seguir devolviendo `200` con todas las reservas del tenant (`RES_A` y `RES_B`
+juntas), sin exigir token — confirma que el endpoint público existente no quedó
+afectado por esta spec.
+
+Ejecutado el 2026-09-05 contra la base de desarrollo local (mismo Postgres
+`multitour-postgres`, tenant `spec016-reservas-demo` con tres End Customers
+sintéticos, sin afectar tenants reales). `./mvnw test` en verde (`contextLoads`,
+sin migraciones nuevas) antes de levantar la app. Los 8 pasos de `curl` de esta
+sección (listado propio, lista vacía, 401 sin token, 404 sobre reserva ajena, 403
+tenant_mismatch, y la regresión del listado público sin filtrar) devolvieron los
+códigos HTTP y payloads exactos documentados arriba.

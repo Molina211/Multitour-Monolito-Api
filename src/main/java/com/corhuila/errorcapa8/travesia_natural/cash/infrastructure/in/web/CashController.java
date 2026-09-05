@@ -85,9 +85,8 @@ public class CashController {
     public ResponseEntity<CashRegisterResponse> registerMovement(@PathVariable String tenantId,
                                                                    @PathVariable UUID cashRegisterId,
                                                                    @RequestBody RegisterCashMovementRequest request) {
-        CashMovementType type = request.type() != null ? CashMovementType.valueOf(request.type()) : null;
-        RegisterCashMovementCommand command = new RegisterCashMovementCommand(tenantId, cashRegisterId, type,
-                request.amount(), request.concept(), request.actorId());
+        RegisterCashMovementCommand command = new RegisterCashMovementCommand(tenantId, cashRegisterId,
+                CashMovementType.fromLabel(request.type()), request.amount(), request.concept(), request.actorId());
 
         CashRegister cashRegister = registerCashMovementUseCase.registerMovement(command);
 

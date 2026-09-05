@@ -83,7 +83,7 @@ public class CashRegisterRepositoryAdapter implements CashRegisterRepositoryPort
     }
 
     private static CashMovementEntity toMovementEntity(CashMovement movement) {
-        return new CashMovementEntity(movement.type().name(), movement.amount(), movement.concept(),
+        return new CashMovementEntity(movement.type().label(), movement.amount(), movement.concept(),
                 movement.actorId(), movement.recordedAt());
     }
 
@@ -115,7 +115,7 @@ public class CashRegisterRepositoryAdapter implements CashRegisterRepositoryPort
 
     private static CashRegister toDomain(CashRegisterEntity entity) {
         List<CashMovement> movements = entity.getMovements().stream()
-                .map(m -> new CashMovement(CashMovementType.valueOf(m.getType()), m.getAmount(), m.getConcept(),
+                .map(m -> new CashMovement(CashMovementType.fromLabel(m.getType()), m.getAmount(), m.getConcept(),
                         m.getActorId(), m.getRecordedAt()))
                 .toList();
 

@@ -24,7 +24,7 @@ public class UpdateCatalogItemService implements UpdateCatalogItemUseCase {
 
         CatalogItem updated = catalogItem.update(
                 command.name(), command.price(), command.capacity(), command.restrictions(), command.validFrom(),
-                command.validTo(), command.policy(), command.image());
+                command.validTo(), command.policy(), command.image(), command.route(), command.operationalCost());
 
         return catalogItemRepositoryPort.save(updated);
     }

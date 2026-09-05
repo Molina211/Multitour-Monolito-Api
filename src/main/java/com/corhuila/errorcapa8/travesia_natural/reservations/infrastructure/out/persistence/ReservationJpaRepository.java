@@ -11,4 +11,6 @@ public interface ReservationJpaRepository extends JpaRepository<ReservationEntit
     Optional<ReservationEntity> findByTenantIdAndReservationId(String tenantId, UUID reservationId);
 
     List<ReservationEntity> findAllByTenantId(String tenantId);
+
+    List<ReservationEntity> findAllByTenantIdAndCustomerId(String tenantId, String customerId);
 }

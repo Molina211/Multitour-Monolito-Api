@@ -7,5 +7,6 @@ import java.time.LocalDate;
 
 public record CreateCatalogItemCommand(String tenantId, CatalogItemType type, String name, BigDecimal price,
                                         Integer capacity, String restrictions, LocalDate validFrom,
-                                        LocalDate validTo, String policy, String image) {
+                                        LocalDate validTo, String policy, String image, String route,
+                                        BigDecimal operationalCost) {
 }

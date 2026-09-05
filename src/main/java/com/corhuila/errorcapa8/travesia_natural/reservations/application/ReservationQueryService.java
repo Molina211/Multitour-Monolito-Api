@@ -44,6 +44,32 @@ public class ReservationQueryService implements ReservationQueryUseCase {
     }
 
     @Override
+    public List<Reservation> listByTenantAndCustomer(String tenantId, String customerId) {
+        requireTenant(tenantId);
+
+        return reservationRepositoryPort.findAllByTenantIdAndCustomerId(tenantId, customerId);
+    }
+
+    /**
+     * Same {@link ReservationNotFoundException} for "does not exist" and "exists but
+     * belongs to someone else" — mirrors CollaboratorQueryService (spec 014): never reveal
+     * a resource's existence to a caller who is not its owner.
+     */
+    @Override
+    public Reservation getByIdForCustomer(String tenantId, String customerId, UUID reservationId) {
+        requireTenant(tenantId);
+
+        Reservation reservation = reservationRepositoryPort.findByTenantIdAndReservationId(tenantId, reservationId)
+                .orElseThrow(() -> new ReservationNotFoundException(reservationId.toString()));
+
+        if (!reservation.customerId().equals(customerId)) {
+            throw new ReservationNotFoundException(reservationId.toString());
+        }
+
+        return reservation;
+    }
+
+    @Override
     public List<Reservation> listPendingSupportByTenant(String tenantId) {
         requireActiveTenant(tenantId);
 
