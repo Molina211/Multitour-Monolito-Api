@@ -113,6 +113,14 @@ public class ReservationRepositoryAdapter implements ReservationRepositoryPort {
                 .toList();
     }
 
+    @Override
+    @Transactional(readOnly = true)
+    public List<Reservation> findAllByTenantIdAndCustomerId(String tenantId, String customerId) {
+        return jpaRepository.findAllByTenantIdAndCustomerId(tenantId, customerId).stream()
+                .map(ReservationRepositoryAdapter::toDomain)
+                .toList();
+    }
+
     private static Reservation toDomain(ReservationEntity entity) {
         List<ReservedService> reservedServices = entity.getReservedServices().stream()
                 .map(rs -> new ReservedService(rs.getServiceReference(), rs.getPartySize(), rs.getScheduledDate()))

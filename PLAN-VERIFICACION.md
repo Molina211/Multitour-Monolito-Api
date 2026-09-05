@@ -2154,3 +2154,120 @@ levantar la app. Los 7 pasos de `curl` de esta sección (creación sin opcionale
 round-trip route/operationalCost, PATCH parcial, regresión LODGING, tenant
 inexistente, aislamiento entre tenants, soft delete/reactivate, tenant inactivo)
 devolvieron los códigos HTTP y payloads exactos documentados arriba.
+
+## Spec 016 — Aislamiento de reservas por Cliente
+
+Agrega `GET .../reservations/me` y `GET .../reservations/me/{reservationId}`,
+protegidos con JWT, que filtran por el `customerId` (`membershipId` del token) del
+llamante. No toca los endpoints públicos existentes `GET .../reservations` (Staff,
+sin filtrar) ni `GET .../reservations/{reservationId}`.
+
+### 1. Compilación y tests
+
+```bash
+./mvnw test
+```
+
+Debe mantener `contextLoads` en verde (no hay migración nueva en esta spec).
+
+### 2. Crear un tenant activo y dos End Customers distintos
+
+```bash
+curl -X POST http://localhost:8080/api/tenants \
+  -H "Content-Type: application/json" \
+  -d '{
+    "tenantId": "spec016-reservas-demo",
+    "commercialName": "Spec016 Reservas Demo",
+    "actorId": "system-test",
+    "administrator": {
+      "name": "Admin Spec016",
+      "email": "admin@spec016-reservas-demo.test",
+      "password": "Passw0rd!123",
+      "passwordConfirmation": "Passw0rd!123"
+    }
+  }'
+
+curl -X POST http://localhost:8080/api/tenants/spec016-reservas-demo/customers \
+  -H "Content-Type: application/json" \
+  -d '{"firstName":"Cliente","lastName":"A","email":"clientea@spec016.test","phone":"3000000001","password":"Passw0rd!123","passwordConfirmation":"Passw0rd!123"}'
+
+curl -X POST http://localhost:8080/api/tenants/spec016-reservas-demo/customers \
+  -H "Content-Type: application/json" \
+  -d '{"firstName":"Cliente","lastName":"B","email":"clienteb@spec016.test","phone":"3000000002","password":"Passw0rd!123","passwordConfirmation":"Passw0rd!123"}'
+```
+
+Login de cada uno (`POST .../login`) para obtener `TOKEN_A`/`TOKEN_B` con
+`membershipId` distinto.
+
+### 3. Cada Cliente crea su propia reserva
+
+```bash
+curl -X POST http://localhost:8080/api/tenants/spec016-reservas-demo/reservations \
+  -H "Content-Type: application/json" -H "Authorization: Bearer ${TOKEN_A}" \
+  -d '{"projectedValue": 150000, "reservedServices": [{"serviceReference": "tour-demo-1", "partySize": 2, "scheduledDate": "2026-10-01"}]}'
+
+curl -X POST http://localhost:8080/api/tenants/spec016-reservas-demo/reservations \
+  -H "Content-Type: application/json" -H "Authorization: Bearer ${TOKEN_B}" \
+  -d '{"projectedValue": 200000, "reservedServices": [{"serviceReference": "tour-demo-2", "partySize": 1, "scheduledDate": "2026-10-02"}]}'
+```
+
+Guardar `RES_A`/`RES_B` de cada respuesta.
+
+### 4. `GET .../reservations/me` filtra por Cliente
+
+```bash
+curl -s http://localhost:8080/api/tenants/spec016-reservas-demo/reservations/me \
+  -H "Authorization: Bearer ${TOKEN_A}"
+```
+
+Debe devolver únicamente `RES_A`, nunca `RES_B`.
+
+### 5. Lista vacía para un Cliente sin reservas
+
+Registrar y loguear un tercer Cliente (`clientec@spec016.test`, sin crear ninguna
+reserva) y repetir el paso 4 con su token: debe devolver `[]`.
+
+### 6. Sin token → `401`
+
+```bash
+curl -s -o /dev/null -w "%{http_code}\n" http://localhost:8080/api/tenants/spec016-reservas-demo/reservations/me
+```
+
+Debe devolver `401`.
+
+### 7. Detalle de la reserva ajena por `/me/{id}` → `404`
+
+```bash
+curl -s -o /dev/null -w "%{http_code}\n" http://localhost:8080/api/tenants/spec016-reservas-demo/reservations/me/${RES_B} \
+  -H "Authorization: Bearer ${TOKEN_A}"
+```
+
+Cliente A pidiendo la reserva de Cliente B debe devolver `404` (mismo patrón de
+404 unificado que spec 014, nunca revela que la reserva existe).
+
+### 8. Token de otro tenant → `403 tenant_mismatch`
+
+```bash
+curl -s -w "\nHTTP:%{http_code}\n" http://localhost:8080/api/tenants/otro-tenant-cualquiera/reservations/me \
+  -H "Authorization: Bearer ${TOKEN_A}"
+```
+
+Debe devolver `403` con `{"error":"tenant_mismatch", ...}`.
+
+### 9. Regresión: `GET .../reservations` (Staff, sin autenticación) sigue sin filtrar
+
+```bash
+curl -s http://localhost:8080/api/tenants/spec016-reservas-demo/reservations
+```
+
+Debe seguir devolviendo `200` con todas las reservas del tenant (`RES_A` y `RES_B`
+juntas), sin exigir token — confirma que el endpoint público existente no quedó
+afectado por esta spec.
+
+Ejecutado el 2026-09-05 contra la base de desarrollo local (mismo Postgres
+`multitour-postgres`, tenant `spec016-reservas-demo` con tres End Customers
+sintéticos, sin afectar tenants reales). `./mvnw test` en verde (`contextLoads`,
+sin migraciones nuevas) antes de levantar la app. Los 8 pasos de `curl` de esta
+sección (listado propio, lista vacía, 401 sin token, 404 sobre reserva ajena, 403
+tenant_mismatch, y la regresión del listado público sin filtrar) devolvieron los
+códigos HTTP y payloads exactos documentados arriba.

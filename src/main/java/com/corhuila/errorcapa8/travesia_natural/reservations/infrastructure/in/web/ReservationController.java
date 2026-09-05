@@ -112,6 +112,37 @@ public class ReservationController {
         return ResponseEntity.ok(ReservationResponse.from(reservationQueryUseCase.getById(tenantId, reservationId)));
     }
 
+    @GetMapping("/me")
+    public ResponseEntity<List<ReservationResponse>> listMine(@PathVariable String tenantId,
+                                                                 Authentication authentication) {
+        JwtPrincipal principal = (JwtPrincipal) authentication.getPrincipal();
+        if (!principal.tenantId().equals(tenantId)) {
+            throw new TenantMismatchException();
+        }
+
+        List<ReservationResponse> reservations = reservationQueryUseCase
+                .listByTenantAndCustomer(tenantId, principal.membershipId()).stream()
+                .map(ReservationResponse::from)
+                .toList();
+
+        return ResponseEntity.ok(reservations);
+    }
+
+    @GetMapping("/me/{reservationId}")
+    public ResponseEntity<ReservationResponse> getMineById(@PathVariable String tenantId,
+                                                              @PathVariable UUID reservationId,
+                                                              Authentication authentication) {
+        JwtPrincipal principal = (JwtPrincipal) authentication.getPrincipal();
+        if (!principal.tenantId().equals(tenantId)) {
+            throw new TenantMismatchException();
+        }
+
+        Reservation reservation = reservationQueryUseCase
+                .getByIdForCustomer(tenantId, principal.membershipId(), reservationId);
+
+        return ResponseEntity.ok(ReservationResponse.from(reservation));
+    }
+
     @PostMapping("/{reservationId}/cancel")
     public ResponseEntity<ReservationResponse> cancel(@PathVariable String tenantId,
                                                          @PathVariable UUID reservationId,
