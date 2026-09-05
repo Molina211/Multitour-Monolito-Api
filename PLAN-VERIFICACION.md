@@ -1949,3 +1949,125 @@ movimientos migrados al nuevo formato.
 ```
 
 Deben seguir en verde `contextLoads` y los tests existentes, sin regresiones.
+
+# Plan de verificación — Spec 014: Registro y consulta de colaboradores operativos
+
+Cierra una de las 20 brechas confirmadas en el análisis Backend-vs-PDR del 2026-09-04:
+`MembershipRole.OPERATIONAL_COLLABORATOR` existía en el enum desde spec 002 sin ningún
+caso de uso que lo asignara. El Frontend (rama `develop`, push de Fernanda Robayo del
+2026-09-03/04, ver regla 11 de CLAUDE.md, solo lectura) ya tiene pantallas reales
+(`collaborators`, `collaborators/new`, `collaborators/detail`) corriendo en simulación
+local. No hay integración HTTP real todavía (decisión vigente: sin llamadas HTTP entre
+Backend y Frontend hasta que ambos módulos estén completos); esta verificación es
+enteramente vía `curl` contra el Backend en aislamiento.
+
+Reutiliza el patrón ya existente de `Membership`/`RegisterCustomerService`/
+`CreateTenantService`: mismo `PasswordPolicy`, mismo `EmailAlreadyRegisteredException`,
+mismo `AuditRecorder`. El campo "nombre completo" del Frontend se guarda en
+`firstName` (`lastName` queda `null`, igual que en Administrator) — sin migración de
+esquema, la tabla `memberships` ya es genérica. El toggle "colaborador puede validar
+soportes de transferencia" (PDR línea 115) quedó fuera de esta spec a propósito (ver
+spec.md, "Fuera de alcance" y decisión abierta 2).
+
+## 1. Crear un tenant + Administrator de prueba
+
+```bash
+curl -s -X POST http://localhost:8080/api/tenants \
+  -H "Content-Type: application/json" \
+  -d '{ "tenantId": "spec014-collab-demo", "commercialName": "Spec 014 Demo",
+        "administrator": { "email": "admin@spec014.test", "password": "Admin123!",
+        "passwordConfirmation": "Admin123!" }, "actorId": "platform-admin" }'
+```
+
+Debe devolver `201` con `tenantStatus: "ACTIVO"`.
+
+## 2. Registrar un colaborador válido (`201`)
+
+```bash
+curl -i -X POST http://localhost:8080/api/tenants/spec014-collab-demo/collaborators \
+  -H "Content-Type: application/json" \
+  -d '{ "name": "Laura Perez", "email": "laura@spec014.test", "password": "Colab123!",
+        "passwordConfirmation": "Colab123!", "actorId": "admin@spec014.test" }'
+```
+
+Debe devolver `201` con `role: "OPERATIONAL_COLLABORATOR"`, `name: "Laura Perez"` y sin
+ningún campo de contraseña en la respuesta.
+
+## 3. Rechazo por correo duplicado en el mismo tenant (`409`)
+
+```bash
+curl -i -X POST http://localhost:8080/api/tenants/spec014-collab-demo/collaborators \
+  -H "Content-Type: application/json" \
+  -d '{ "name": "Otra Laura", "email": "laura@spec014.test", "password": "Colab123!",
+        "passwordConfirmation": "Colab123!", "actorId": "admin@spec014.test" }'
+```
+
+Debe devolver `409` (`"email_already_registered"`).
+
+## 4. Rechazo por política de contraseña incumplida (`400`)
+
+```bash
+curl -i -X POST http://localhost:8080/api/tenants/spec014-collab-demo/collaborators \
+  -H "Content-Type: application/json" \
+  -d '{ "name": "Otro Nombre", "email": "debil@spec014.test", "password": "123",
+        "passwordConfirmation": "123", "actorId": "admin@spec014.test" }'
+```
+
+Debe devolver `400` (`"validation_error"`, mensaje de `PasswordPolicy`).
+
+## 5. Listado y detalle del colaborador (`200`, sin `passwordHash`)
+
+```bash
+curl -s http://localhost:8080/api/tenants/spec014-collab-demo/collaborators
+
+MEMBERSHIP_ID="<el membershipId devuelto en el paso 2>"
+curl -s http://localhost:8080/api/tenants/spec014-collab-demo/collaborators/${MEMBERSHIP_ID}
+```
+
+El listado debe incluir a Laura con `name`/`email`/`role`. El detalle debe traer los
+mismos datos, sin ningún campo `passwordHash` en el JSON.
+
+## 6. Login del colaborador recién registrado (`200`, JWT con su rol)
+
+```bash
+curl -s -X POST http://localhost:8080/api/tenants/spec014-collab-demo/login \
+  -H "Content-Type: application/json" \
+  -d '{ "email": "laura@spec014.test", "password": "Colab123!" }'
+```
+
+Debe devolver `200` con `accessToken` y `role: "OPERATIONAL_COLLABORATOR"` — sin
+cambios en `LoginService`, ya era agnóstico al rol.
+
+## 7. Aislamiento entre tenants (`200` vacío, `404` cruzado)
+
+```bash
+curl -s -X POST http://localhost:8080/api/tenants \
+  -H "Content-Type: application/json" \
+  -d '{ "tenantId": "spec014-collab-demo-2", "commercialName": "Spec 014 Aislamiento",
+        "administrator": { "email": "admin2@spec014.test", "password": "Admin123!",
+        "passwordConfirmation": "Admin123!" }, "actorId": "platform-admin" }'
+
+curl -s http://localhost:8080/api/tenants/spec014-collab-demo-2/collaborators
+
+curl -i http://localhost:8080/api/tenants/spec014-collab-demo-2/collaborators/${MEMBERSHIP_ID}
+```
+
+El listado del segundo tenant debe venir vacío (`[]`). Consultar el detalle del
+colaborador del primer tenant desde el segundo debe devolver `404`
+(`"collaborator_not_found"`), no `200` con datos ajenos.
+
+## 8. Compilación y tests
+
+```bash
+./mvnw test
+```
+
+Deben seguir en verde `contextLoads` y los tests existentes, sin regresiones.
+
+Ejecutado el 2026-09-04 contra la base de desarrollo local (Postgres en `multitour-postgres`,
+tenants `spec014-collab-demo` y `spec014-collab-demo-2`, datos sintéticos de prueba, sin
+afectar tenants reales). `./mvnw test` en verde (`contextLoads`, 12 migraciones validadas)
+antes de levantar la app. Los 7 pasos de `curl` (registro, duplicado, password débil,
+listado, detalle sin `passwordHash`, login con `role: OPERATIONAL_COLLABORATOR`,
+aislamiento cruzado con `404 collaborator_not_found`) devolvieron los códigos HTTP y
+payloads exactos documentados arriba.

@@ -6,7 +6,9 @@ import com.corhuila.errorcapa8.travesia_natural.tenants.domain.model.MembershipS
 import com.corhuila.errorcapa8.travesia_natural.tenants.domain.port.out.MembershipRepositoryPort;
 import org.springframework.stereotype.Component;
 
+import java.util.List;
 import java.util.Optional;
+import java.util.UUID;
 
 @Component
 public class MembershipRepositoryAdapter implements MembershipRepositoryPort {
@@ -42,6 +44,19 @@ public class MembershipRepositoryAdapter implements MembershipRepositoryPort {
     @Override
     public Optional<Membership> findByTenantIdAndEmail(String tenantId, String email) {
         return jpaRepository.findByTenantIdAndEmail(tenantId, email).map(MembershipRepositoryAdapter::toDomain);
+    }
+
+    @Override
+    public List<Membership> findAllByTenantIdAndRole(String tenantId, MembershipRole role) {
+        return jpaRepository.findAllByTenantIdAndRole(tenantId, role.name()).stream()
+                .map(MembershipRepositoryAdapter::toDomain)
+                .toList();
+    }
+
+    @Override
+    public Optional<Membership> findByTenantIdAndMembershipId(String tenantId, UUID membershipId) {
+        return jpaRepository.findByTenantIdAndMembershipId(tenantId, membershipId)
+                .map(MembershipRepositoryAdapter::toDomain);
     }
 
     private static Membership toDomain(MembershipEntity entity) {

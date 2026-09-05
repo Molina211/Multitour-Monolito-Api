@@ -104,6 +104,42 @@ public final class Membership {
     }
 
     /**
+     * Creates an Operational Collaborator membership (spec 014, "Gestión de colaboradores
+     * del operador"). {@code passwordHash} must already be hashed by the caller (application
+     * layer, via PasswordEncoder). {@code name} is the collaborator's full name as entered by
+     * the Administrator — stored in {@code firstName}; {@code lastName} and {@code phone} stay
+     * {@code null}, same as {@code createAdministrator}, because the Frontend collects a single
+     * "nombre completo" field, not first/last name separately.
+     */
+    public static Membership createOperationalCollaborator(String tenantId, String name, String email,
+                                                             String passwordHash) {
+        if (tenantId == null || tenantId.isBlank()) {
+            throw new InvalidTenantException("tenantId is required");
+        }
+        if (name == null || name.isBlank()) {
+            throw new InvalidTenantException("collaborator name is required");
+        }
+        if (email == null || email.isBlank()) {
+            throw new InvalidTenantException("collaborator email is required");
+        }
+        if (passwordHash == null || passwordHash.isBlank()) {
+            throw new InvalidTenantException("collaborator password is required");
+        }
+
+        return new Membership(
+                UUID.randomUUID(),
+                tenantId,
+                name,
+                null,
+                email,
+                null,
+                passwordHash,
+                MembershipRole.OPERATIONAL_COLLABORATOR,
+                MembershipStatus.ACTIVA,
+                Instant.now());
+    }
+
+    /**
      * Rebuilds a Membership already persisted (spec 004, login). Unlike {@code createAdministrator}/
      * {@code createEndCustomer}, this factory does not enforce the creation-time invariants (e.g.
      * firstName required) because a row that already exists in the database was valid when it was
