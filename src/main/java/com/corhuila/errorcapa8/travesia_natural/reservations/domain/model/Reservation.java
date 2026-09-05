@@ -6,6 +6,7 @@ import com.corhuila.errorcapa8.travesia_natural.reservations.domain.exception.Re
 import com.corhuila.errorcapa8.travesia_natural.reservations.domain.exception.ReservationNotCancellableException;
 import com.corhuila.errorcapa8.travesia_natural.reservations.domain.exception.ReservationNotExecutableException;
 import com.corhuila.errorcapa8.travesia_natural.reservations.domain.exception.ReservationNotFinalizableException;
+import com.corhuila.errorcapa8.travesia_natural.reservations.domain.exception.ReservationNotModifiableException;
 import com.corhuila.errorcapa8.travesia_natural.reservations.domain.exception.ReservationNotRefundableException;
 
 import java.math.BigDecimal;
@@ -54,6 +55,9 @@ public final class Reservation {
     private final Instant refundedAt;
     private final String finalizedBy;
     private final Instant finalizedAt;
+    private final String modificationReason;
+    private final String modifiedBy;
+    private final Instant modifiedAt;
     private final String holderDocument;
     private final List<Companion> companions;
 
@@ -67,7 +71,8 @@ public final class Reservation {
                          String refundAuthorizedBy, Instant refundAuthorizedAt, String refundAuthorizationNote,
                          String refundRejectedBy, Instant refundRejectedAt, String refundRejectionReason,
                          BigDecimal refundedAmount, String refundReason, String refundedBy, String refundMethod,
-                         Instant refundedAt, String finalizedBy, Instant finalizedAt, String holderDocument,
+                         Instant refundedAt, String finalizedBy, Instant finalizedAt, String modificationReason,
+                         String modifiedBy, Instant modifiedAt, String holderDocument,
                          List<Companion> companions) {
         this.reservationId = reservationId;
         this.tenantId = tenantId;
@@ -100,6 +105,9 @@ public final class Reservation {
         this.refundedAt = refundedAt;
         this.finalizedBy = finalizedBy;
         this.finalizedAt = finalizedAt;
+        this.modificationReason = modificationReason;
+        this.modifiedBy = modifiedBy;
+        this.modifiedAt = modifiedAt;
         this.holderDocument = holderDocument;
         this.companions = companions;
     }
@@ -140,6 +148,9 @@ public final class Reservation {
                 PaymentStatus.SIN_PAGO,
                 null,
                 Instant.now(),
+                null,
+                null,
+                null,
                 null,
                 null,
                 null,
@@ -209,13 +220,15 @@ public final class Reservation {
                                             String refundRejectionReason, BigDecimal refundedAmount,
                                             String refundReason, String refundedBy, String refundMethod,
                                             Instant refundedAt, String finalizedBy, Instant finalizedAt,
+                                            String modificationReason, String modifiedBy, Instant modifiedAt,
                                             String holderDocument, List<Companion> companions) {
         return new Reservation(reservationId, tenantId, customerId, reservedServices, projectedValue, finalValue,
                 pendingBalance, creditBalance, reservationStatus, paymentStatus, paymentMethod, createdAt,
                 pendingTransferAmount, transferSupportReference, cancellationReason, cancelledBy, cancelledAt,
                 refundDecisionStatus, refundAuthorizedBy, refundAuthorizedAt, refundAuthorizationNote,
                 refundRejectedBy, refundRejectedAt, refundRejectionReason, refundedAmount, refundReason, refundedBy,
-                refundMethod, refundedAt, finalizedBy, finalizedAt, holderDocument, companions);
+                refundMethod, refundedAt, finalizedBy, finalizedAt, modificationReason, modifiedBy, modifiedAt,
+                holderDocument, companions);
     }
 
     /**
@@ -232,7 +245,7 @@ public final class Reservation {
         return new Reservation(reservationId, tenantId, customerId, reservedServices, projectedValue, finalValue,
                 BigDecimal.ZERO, creditBalance, ReservationStatus.CONFIRMADA, PaymentStatus.PAGADO, "Efectivo",
                 createdAt, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null,
-                null, null, null, null, holderDocument, companions);
+                null, null, null, null, modificationReason, modifiedBy, modifiedAt, holderDocument, companions);
     }
 
     /**
@@ -251,7 +264,8 @@ public final class Reservation {
                 settled ? ReservationStatus.CONFIRMADA : reservationStatus,
                 settled ? PaymentStatus.PAGADO : PaymentStatus.PARCIAL,
                 "Abono", createdAt, null, null, null, null, null, null, null, null, null, null, null, null, null,
-                null, null, null, null, null, null, holderDocument, companions);
+                null, null, null, null, null, null, modificationReason, modifiedBy, modifiedAt, holderDocument,
+                companions);
     }
 
     /**
@@ -270,7 +284,8 @@ public final class Reservation {
         return new Reservation(reservationId, tenantId, customerId, reservedServices, projectedValue, finalValue,
                 pendingBalance, creditBalance, reservationStatus, PaymentStatus.EN_VALIDACION, "Transferencia",
                 createdAt, amount, supportReference, null, null, null, null, null, null, null, null, null, null,
-                null, null, null, null, null, null, null, holderDocument, companions);
+                null, null, null, null, null, null, null, modificationReason, modifiedBy, modifiedAt, holderDocument,
+                companions);
     }
 
     /**
@@ -285,7 +300,8 @@ public final class Reservation {
         return new Reservation(reservationId, tenantId, customerId, reservedServices, projectedValue, finalValue,
                 pendingBalance, creditBalance, reservationStatus, paymentStatus, paymentMethod, createdAt,
                 pendingTransferAmount, transferSupportReference, null, null, null, null, null, null, null, null,
-                null, null, null, null, null, null, null, null, null, holderDocument, companions)
+                null, null, null, null, null, null, null, null, null, modificationReason, modifiedBy, modifiedAt,
+                holderDocument, companions)
                 .registerInstallmentPayment(pendingTransferAmount);
     }
 
@@ -301,7 +317,7 @@ public final class Reservation {
         return new Reservation(reservationId, tenantId, customerId, reservedServices, projectedValue, finalValue,
                 pendingBalance, creditBalance, reservationStatus, PaymentStatus.RECHAZADO, paymentMethod,
                 createdAt, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null,
-                null, null, null, null, holderDocument, companions);
+                null, null, null, null, modificationReason, modifiedBy, modifiedAt, holderDocument, companions);
     }
 
     /**
@@ -319,7 +335,63 @@ public final class Reservation {
         return new Reservation(reservationId, tenantId, customerId, reservedServices, projectedValue, finalValue,
                 pendingBalance, creditBalance, ReservationStatus.EN_EJECUCION, paymentStatus, paymentMethod,
                 createdAt, pendingTransferAmount, transferSupportReference, null, null, null, null, null, null,
-                null, null, null, null, null, null, null, null, null, null, null, holderDocument, companions);
+                null, null, null, null, null, null, null, null, null, null, null, modificationReason, modifiedBy,
+                modifiedAt, holderDocument, companions);
+    }
+
+    /**
+     * Modifica los servicios reservados y los valores de una reserva antes de que
+     * inicie ejecución (spec 022): solo permitido desde `PendienteDePago` o
+     * `Confirmada`, y solo si no hay una transferencia en espera de aprobación/rechazo
+     * (esa decisión debe resolverse primero, spec 009). Reutiliza exactamente la misma
+     * fórmula de saldo a favor que `cancel()` (spec 011): si lo ya pagado
+     * (`finalValue - pendingBalance`, con los valores ANTERIORES) supera el nuevo
+     * `finalValue`, el excedente queda como saldo a favor pendiente de devolución y
+     * nace una solicitud de devolución en `PENDIENTE_AUTORIZACION` (spec 019,
+     * RN-RES-008); si no, el nuevo saldo pendiente es simplemente la diferencia.
+     */
+    public Reservation modify(List<ReservedService> reservedServices, BigDecimal projectedValue,
+                               BigDecimal finalValue, String reason, String actorId) {
+        if (reason == null || reason.isBlank()) {
+            throw new InvalidReservationException("modification reason is required");
+        }
+        if (actorId == null || actorId.isBlank()) {
+            throw new InvalidReservationException("modification actorId is required");
+        }
+        if (reservedServices == null || reservedServices.isEmpty()) {
+            throw new InvalidReservationException("reservedServices must not be empty");
+        }
+        if (projectedValue == null || projectedValue.signum() < 0) {
+            throw new InvalidReservationException("projectedValue must not be negative");
+        }
+        if (finalValue == null || finalValue.signum() < 0) {
+            throw new InvalidReservationException("finalValue must not be negative");
+        }
+        if (reservationStatus != ReservationStatus.PENDIENTE_DE_PAGO && reservationStatus != ReservationStatus.CONFIRMADA) {
+            throw new ReservationNotModifiableException(
+                    "reservation must be PendienteDePago or Confirmada to be modified, current status: "
+                            + reservationStatus.label() + " (reservation: " + reservationId + ")");
+        }
+        if (pendingTransferAmount != null) {
+            throw new ReservationNotModifiableException(
+                    "reservation has a transfer awaiting a support decision, resolve it before modifying (reservation: "
+                            + reservationId + ")");
+        }
+        BigDecimal amountAlreadyPaid = this.finalValue.subtract(pendingBalance);
+        BigDecimal rawNewPendingBalance = finalValue.subtract(amountAlreadyPaid);
+        boolean overpaid = rawNewPendingBalance.signum() < 0;
+        BigDecimal newPendingBalance = overpaid ? BigDecimal.ZERO : rawNewPendingBalance;
+        BigDecimal newCreditBalance = overpaid ? rawNewPendingBalance.negate() : creditBalance;
+        PaymentStatus newPaymentStatus = overpaid ? PaymentStatus.SALDO_A_FAVOR_PENDIENTE : paymentStatus;
+        RefundDecisionStatus newRefundDecisionStatus =
+                overpaid ? RefundDecisionStatus.PENDIENTE_AUTORIZACION : refundDecisionStatus;
+        return new Reservation(reservationId, tenantId, customerId, reservedServices, projectedValue, finalValue,
+                newPendingBalance, newCreditBalance, reservationStatus, newPaymentStatus, paymentMethod, createdAt,
+                pendingTransferAmount, transferSupportReference, cancellationReason, cancelledBy, cancelledAt,
+                newRefundDecisionStatus, refundAuthorizedBy, refundAuthorizedAt, refundAuthorizationNote,
+                refundRejectedBy, refundRejectedAt, refundRejectionReason, refundedAmount, refundReason, refundedBy,
+                refundMethod, refundedAt, finalizedBy, finalizedAt, reason, actorId, Instant.now(), holderDocument,
+                companions);
     }
 
     /**
@@ -355,7 +427,8 @@ public final class Reservation {
                 pendingBalance, newCreditBalance, ReservationStatus.CANCELADA, newPaymentStatus, paymentMethod,
                 createdAt, pendingTransferAmount, transferSupportReference, reason, actorId, Instant.now(),
                 newRefundDecisionStatus, null, null, null, null, null, null,
-                null, null, null, null, null, null, null, holderDocument, companions);
+                null, null, null, null, null, null, null, modificationReason, modifiedBy, modifiedAt, holderDocument,
+                companions);
     }
 
     /**
@@ -377,7 +450,7 @@ public final class Reservation {
                 pendingTransferAmount, transferSupportReference, cancellationReason, cancelledBy, cancelledAt,
                 RefundDecisionStatus.AUTORIZADA, actorId, Instant.now(), note, null, null, null,
                 refundedAmount, refundReason, refundedBy, refundMethod, refundedAt, finalizedBy, finalizedAt,
-                holderDocument, companions);
+                modificationReason, modifiedBy, modifiedAt, holderDocument, companions);
     }
 
     /**
@@ -398,7 +471,7 @@ public final class Reservation {
                 pendingTransferAmount, transferSupportReference, cancellationReason, cancelledBy, cancelledAt,
                 RefundDecisionStatus.RECHAZADA, null, null, null, actorId, Instant.now(), reason,
                 refundedAmount, refundReason, refundedBy, refundMethod, refundedAt, finalizedBy, finalizedAt,
-                holderDocument, companions);
+                modificationReason, modifiedBy, modifiedAt, holderDocument, companions);
     }
 
     /**
@@ -434,7 +507,8 @@ public final class Reservation {
                 paymentMethod, createdAt, pendingTransferAmount, transferSupportReference, cancellationReason,
                 cancelledBy, cancelledAt, RefundDecisionStatus.EJECUTADA, refundAuthorizedBy, refundAuthorizedAt,
                 refundAuthorizationNote, refundRejectedBy, refundRejectedAt, refundRejectionReason,
-                amount, reason, actorId, method, Instant.now(), finalizedBy, finalizedAt, holderDocument, companions);
+                amount, reason, actorId, method, Instant.now(), finalizedBy, finalizedAt, modificationReason,
+                modifiedBy, modifiedAt, holderDocument, companions);
     }
 
     /**
@@ -455,7 +529,7 @@ public final class Reservation {
                 RefundDecisionStatus.SALDO_A_FAVOR_REGISTRADO, refundAuthorizedBy, refundAuthorizedAt,
                 refundAuthorizationNote, refundRejectedBy, refundRejectedAt, refundRejectionReason,
                 refundedAmount, refundReason, refundedBy, refundMethod, refundedAt, finalizedBy, finalizedAt,
-                holderDocument, companions);
+                modificationReason, modifiedBy, modifiedAt, holderDocument, companions);
     }
 
     private void requireRefundDecisionStatus(RefundDecisionStatus expected, String action) {
@@ -484,8 +558,8 @@ public final class Reservation {
         return new Reservation(reservationId, tenantId, customerId, reservedServices, projectedValue, finalValue,
                 pendingBalance, creditBalance, ReservationStatus.FINALIZADA, paymentStatus, paymentMethod,
                 createdAt, pendingTransferAmount, transferSupportReference, null, null, null, null, null, null,
-                null, null, null, null, null, null, null, null, null, actorId, Instant.now(), holderDocument,
-                companions);
+                null, null, null, null, null, null, null, null, null, actorId, Instant.now(), modificationReason,
+                modifiedBy, modifiedAt, holderDocument, companions);
     }
 
     private void validatePaymentAmount(BigDecimal amount) {
@@ -616,6 +690,18 @@ public final class Reservation {
 
     public Instant finalizedAt() {
         return finalizedAt;
+    }
+
+    public String modificationReason() {
+        return modificationReason;
+    }
+
+    public String modifiedBy() {
+        return modifiedBy;
+    }
+
+    public Instant modifiedAt() {
+        return modifiedAt;
     }
 
     public String holderDocument() {

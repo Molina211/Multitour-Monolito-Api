@@ -2821,3 +2821,193 @@ Ejecutado el 2026-09-05 contra la base de desarrollo local (mismo Postgres
 `spec020-demo`). Los 3 pasos devolvieron los payloads exactos documentados arriba;
 los 52 registros de auditoría preexistentes (de specs 002-020) se siguieron leyendo
 sin error con los 4 campos nuevos en `null`.
+
+## 022 — Modificación de reserva antes de ejecución
+
+Corresponde a `specs/022-modificacion-reserva/`. Nuevo endpoint
+`POST .../reservations/{reservationId}/modify` que reemplaza `reservedServices`,
+`projectedValue` y `finalValue` de una reserva `Pendiente de pago` o `Confirmada`
+(misma precondición que `cancel()`, spec 011: no se permite si hay una transferencia
+pendiente de decisión), y recalcula `pendingBalance`/`creditBalance` reutilizando
+exactamente la fórmula de saldo a favor de `cancel()` (spec 011) y el ciclo
+`refundDecisionStatus` de spec 019 cuando el nuevo `finalValue` es menor a lo ya
+pagado. Requiere Postgres arriba (migración V19, columnas `modification_reason`,
+`modified_by`, `modified_at` en `reservations`), la app corriendo, el tenant
+`travesia-natural` `Activo`, y un token válido de `laura.gomez@example.com` (sección
+"007", pasos 1-2) para crear reservas nuevas.
+
+```bash
+TOKEN="<accessToken de la sección 007, paso 1>"
+```
+
+### 1. Compilación y tests
+
+```bash
+./mvnw test
+```
+
+Debe mantener `contextLoads` en verde, con la migración a versión 19 confirmada
+(columnas `modification_reason`, `modified_by`, `modified_at` en `reservations`).
+
+### 2. Modificar una reserva `Pendiente de pago` sin pagos (`200`)
+
+```bash
+curl -s -X POST http://localhost:8080/api/tenants/travesia-natural/reservations \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer ${TOKEN}" \
+  -d '{ "projectedValue": 200000, "reservedServices": [{ "serviceReference": "tour-laguna-verde", "partySize": 2, "scheduledDate": "2026-11-01" }] }'
+```
+
+Guardar el `reservationId` como `RES_T`, sin registrar ningún pago. Modificarla:
+
+```bash
+curl -i -X POST http://localhost:8080/api/tenants/travesia-natural/reservations/${RES_T}/modify \
+  -H "Content-Type: application/json" \
+  -d '{ "reservedServices": [{ "serviceReference": "tour-cocora", "partySize": 3, "scheduledDate": "2026-11-15" }],
+        "projectedValue": 350000, "finalValue": 350000,
+        "reason": "Cliente cambio de plan y de numero de viajeros", "actorId": "operador-1" }'
+```
+
+Se espera `200 OK` con `reservedServices` reemplazado por `tour-cocora`/3/2026-11-15,
+`finalValue: 350000`, `pendingBalance: 350000`, y `modificationReason`/`modifiedBy`
+con los valores enviados.
+
+### 3. Modificar una reserva `Confirmada` (saldo en 0) a un `finalValue` mayor (`200`)
+
+Crear `RES_U` igual que en el paso 2 (`projectedValue: 200000`) y pagarla en efectivo
+(igual que sección "009", paso 1) para llevarla a `Confirmada`:
+
+```bash
+curl -i -X POST http://localhost:8080/api/tenants/travesia-natural/reservations/${RES_U}/payments \
+  -H "Content-Type: application/json" \
+  -d '{ "method": "EFECTIVO", "amount": 200000 }'
+```
+
+Modificarla a un `finalValue` mayor:
+
+```bash
+curl -i -X POST http://localhost:8080/api/tenants/travesia-natural/reservations/${RES_U}/modify \
+  -H "Content-Type: application/json" \
+  -d '{ "reservedServices": [{ "serviceReference": "tour-laguna-verde", "partySize": 4, "scheduledDate": "2026-11-10" }],
+        "projectedValue": 320000, "finalValue": 320000,
+        "reason": "Cliente sumo dos viajeros mas", "actorId": "operador-1" }'
+```
+
+Se espera `200 OK` con `pendingBalance: 120000` (320000 - 200000 ya pagados),
+`creditBalance: 0` y `paymentStatus` sin cambios.
+
+### 4. Modificar una reserva con pago ya registrado a un `finalValue` menor (`200`, saldo a favor)
+
+Crear `RES_V` igual que en el paso 2 (`projectedValue: 200000`) y pagarla por completo
+en efectivo:
+
+```bash
+curl -i -X POST http://localhost:8080/api/tenants/travesia-natural/reservations/${RES_V}/payments \
+  -H "Content-Type: application/json" \
+  -d '{ "method": "EFECTIVO", "amount": 200000 }'
+```
+
+Modificarla a un `finalValue` menor a lo ya pagado:
+
+```bash
+curl -i -X POST http://localhost:8080/api/tenants/travesia-natural/reservations/${RES_V}/modify \
+  -H "Content-Type: application/json" \
+  -d '{ "reservedServices": [{ "serviceReference": "tour-laguna-verde", "partySize": 1, "scheduledDate": "2026-11-05" }],
+        "projectedValue": 130000, "finalValue": 130000,
+        "reason": "Cliente redujo el numero de viajeros", "actorId": "operador-1" }'
+```
+
+Se espera `200 OK` con `creditBalance: 70000` (200000 pagados - 130000 nuevo),
+`paymentStatus: "Saldo a favor pendiente"` y
+`refundDecisionStatus: "Pendiente de autorizacion"`.
+
+### 5. Modificar una reserva `EnEjecucion` o `Cancelada` (`409`)
+
+Reutilizar `RES_G` (`En ejecucion` desde sección "010", paso 1) y `RES_K` (`Cancelada`
+desde sección "011", paso 1):
+
+```bash
+curl -i -X POST http://localhost:8080/api/tenants/travesia-natural/reservations/${RES_G}/modify \
+  -H "Content-Type: application/json" \
+  -d '{ "reservedServices": [{ "serviceReference": "tour-laguna-verde", "partySize": 2, "scheduledDate": "2026-11-20" }],
+        "projectedValue": 250000, "finalValue": 250000,
+        "reason": "Intento de modificacion invalido", "actorId": "operador-1" }'
+```
+
+Se espera `409 Conflict` con `{"error":"reservation_not_modifiable", ...}`. Repetir
+sobre `RES_K`: mismo resultado.
+
+### 6. Modificar una reserva con una transferencia pendiente de decidir (`409`)
+
+Crear `RES_W` igual que en el paso 2 (`projectedValue: 200000`) y registrar una
+transferencia sin decidir (igual que sección "009", paso 4):
+
+```bash
+curl -i -X POST http://localhost:8080/api/tenants/travesia-natural/reservations/${RES_W}/payments \
+  -H "Content-Type: application/json" \
+  -d '{ "method": "TRANSFERENCIA", "amount": 200000, "supportReference": "comprobante-022.png" }'
+```
+
+Intentar modificarla sin resolver la transferencia:
+
+```bash
+curl -i -X POST http://localhost:8080/api/tenants/travesia-natural/reservations/${RES_W}/modify \
+  -H "Content-Type: application/json" \
+  -d '{ "reservedServices": [{ "serviceReference": "tour-laguna-verde", "partySize": 2, "scheduledDate": "2026-11-25" }],
+        "projectedValue": 220000, "finalValue": 220000,
+        "reason": "Intento de modificacion invalido", "actorId": "operador-1" }'
+```
+
+Se espera `409 Conflict` con `{"error":"reservation_not_modifiable", ...}`, y la
+reserva no cambia.
+
+### 7. Validaciones de entrada (`400`)
+
+Sobre `RES_T` (creada en el paso 2), tres variantes con el mismo `curl` base:
+
+```bash
+curl -i -X POST http://localhost:8080/api/tenants/travesia-natural/reservations/${RES_T}/modify \
+  -H "Content-Type: application/json" \
+  -d '{ "reservedServices": [], "projectedValue": 100000, "finalValue": 100000, "reason": "motivo", "actorId": "operador-1" }'
+
+curl -i -X POST http://localhost:8080/api/tenants/travesia-natural/reservations/${RES_T}/modify \
+  -H "Content-Type: application/json" \
+  -d '{ "reservedServices": [{ "serviceReference": "tour-laguna-verde", "partySize": 1, "scheduledDate": "2026-11-01" }], "projectedValue": -100, "finalValue": 100000, "reason": "motivo", "actorId": "operador-1" }'
+
+curl -i -X POST http://localhost:8080/api/tenants/travesia-natural/reservations/${RES_T}/modify \
+  -H "Content-Type: application/json" \
+  -d '{ "reservedServices": [{ "serviceReference": "tour-laguna-verde", "partySize": 1, "scheduledDate": "2026-11-01" }], "projectedValue": 100000, "finalValue": 100000, "reason": "", "actorId": "operador-1" }'
+```
+
+Las tres devuelven `400 Bad Request` con `{"error":"validation_error", ...}`, y la
+reserva no cambia.
+
+### 8. Tenant inexistente (`404`) y tenant `Inactivo` (`409`)
+
+```bash
+curl -i -X POST http://localhost:8080/api/tenants/no-existe/reservations/${RES_T}/modify \
+  -H "Content-Type: application/json" \
+  -d '{ "reservedServices": [{ "serviceReference": "tour-laguna-verde", "partySize": 1, "scheduledDate": "2026-11-01" }], "projectedValue": 100000, "finalValue": 100000, "reason": "motivo", "actorId": "operador-1" }'
+```
+
+Se espera `404 Not Found`. Luego, desactivar `travesia-natural` (paso 5 de la sección
+"002") y repetir la modificación: se espera `409 Conflict` con
+`{"error":"tenant_inactive", ...}`. Reactivar el tenant al terminar (paso 6 de esa
+sección).
+
+### Hallazgo de esta verificación
+
+La ejecución manual del paso 2 encontró un fallo real: `ReservationEntity.updateState(...)`
+nunca tuvo un parámetro `projectedValue` porque, antes de esta spec, ningún otro flujo
+(pago, cancelación, ejecución, devolución) cambiaba ese campo tras la creación de la
+reserva. El `GET` posterior a un `modify()` exitoso devolvía el `projectedValue` viejo
+mientras `finalValue`/`pendingBalance` sí quedaban actualizados. Se corrigió agregando
+`projectedValue` como primer parámetro de `updateState(...)` (`ReservationEntity.java`)
+y pasando `reservation.projectedValue()` en la llamada
+(`ReservationRepositoryAdapter.applyChanges`).
+
+Ejecutado el 2026-09-05 contra la base de desarrollo local (mismo Postgres
+`multitour-postgres`, migración V19 aplicada, tenant `travesia-natural`, cliente
+`laura.gomez@example.com` existente). `./mvnw test` en verde antes y después del fix
+anterior. Los 8 pasos de esta sección devolvieron los códigos HTTP y payloads exactos
+documentados arriba tras la corrección.

@@ -24,12 +24,16 @@ public class ReservationRepositoryAdapter implements ReservationRepositoryPort {
     }
 
     /**
-     * {@code reservedServices} se fija una sola vez al crear la reserva y ningún método de
-     * dominio lo modifica después (pagar/cancelar/devolver solo cambian campos escalares):
-     * si la reserva ya existe, se actualizan esos campos y no se toca la colección de
-     * servicios (antes: se reconstruía el agregado completo en cada guardado, y
-     * `orphanRemoval` borraba y reinsertaba los servicios reservados en cada pago o
-     * cancelación, aunque no hubieran cambiado).
+     * {@code reservedServices} se fija una sola vez al crear la reserva y por defecto
+     * ningún método de dominio lo modifica después (pagar/cancelar/devolver solo cambian
+     * campos escalares): si la reserva ya existe, se actualizan esos campos y no se toca
+     * la colección de servicios (antes: se reconstruía el agregado completo en cada
+     * guardado, y `orphanRemoval` borraba y reinsertaba los servicios reservados en cada
+     * pago o cancelación, aunque no hubieran cambiado). La única excepción es la
+     * modificación explícita de una reserva (spec 022): se detecta comparando
+     * estructuralmente {@code reservation.reservedServices()} contra los ya persistidos
+     * (son {@code record}, ya traen {@code equals()}) y, solo si difieren, se reemplaza
+     * la colección.
      */
     @Override
     @Transactional
@@ -45,6 +49,7 @@ public class ReservationRepositoryAdapter implements ReservationRepositoryPort {
 
     private static ReservationEntity applyChanges(ReservationEntity entity, Reservation reservation) {
         entity.updateState(
+                reservation.projectedValue(),
                 reservation.finalValue(),
                 reservation.pendingBalance(),
                 reservation.creditBalance(),
@@ -69,7 +74,20 @@ public class ReservationRepositoryAdapter implements ReservationRepositoryPort {
                 reservation.refundMethod(),
                 reservation.refundedAt(),
                 reservation.finalizedBy(),
-                reservation.finalizedAt());
+                reservation.finalizedAt(),
+                reservation.modificationReason(),
+                reservation.modifiedBy(),
+                reservation.modifiedAt());
+
+        List<ReservedService> currentReservedServices = entity.getReservedServices().stream()
+                .map(rs -> new ReservedService(rs.getServiceReference(), rs.getPartySize(), rs.getScheduledDate()))
+                .toList();
+        if (!currentReservedServices.equals(reservation.reservedServices())) {
+            entity.replaceReservedServices(reservation.reservedServices().stream()
+                    .map(rs -> new ReservedServiceEntity(
+                            reservation.tenantId(), rs.serviceReference(), rs.partySize(), rs.scheduledDate()))
+                    .toList());
+        }
 
         return entity;
     }
@@ -106,6 +124,9 @@ public class ReservationRepositoryAdapter implements ReservationRepositoryPort {
                 reservation.refundedAt(),
                 reservation.finalizedBy(),
                 reservation.finalizedAt(),
+                reservation.modificationReason(),
+                reservation.modifiedBy(),
+                reservation.modifiedAt(),
                 reservation.holderDocument());
 
         for (ReservedService reservedService : reservation.reservedServices()) {
@@ -191,6 +212,9 @@ public class ReservationRepositoryAdapter implements ReservationRepositoryPort {
                 entity.getRefundedAt(),
                 entity.getFinalizedBy(),
                 entity.getFinalizedAt(),
+                entity.getModificationReason(),
+                entity.getModifiedBy(),
+                entity.getModifiedAt(),
                 entity.getHolderDocument(),
                 companions);
     }
