@@ -67,6 +67,27 @@ public class ReservationEntity {
     @Column(name = "cancelled_at")
     private Instant cancelledAt;
 
+    @Column(name = "refund_decision_status")
+    private String refundDecisionStatus;
+
+    @Column(name = "refund_authorized_by")
+    private String refundAuthorizedBy;
+
+    @Column(name = "refund_authorized_at")
+    private Instant refundAuthorizedAt;
+
+    @Column(name = "refund_authorization_note")
+    private String refundAuthorizationNote;
+
+    @Column(name = "refund_rejected_by")
+    private String refundRejectedBy;
+
+    @Column(name = "refund_rejected_at")
+    private Instant refundRejectedAt;
+
+    @Column(name = "refund_rejection_reason")
+    private String refundRejectionReason;
+
     @Column(name = "refunded_amount")
     private BigDecimal refundedAmount;
 
@@ -88,9 +109,16 @@ public class ReservationEntity {
     @Column(name = "finalized_at")
     private Instant finalizedAt;
 
+    @Column(name = "holder_document")
+    private String holderDocument;
+
     @OneToMany(mappedBy = "reservation", cascade = CascadeType.ALL, orphanRemoval = true)
     @OrderBy("id ASC")
     private List<ReservedServiceEntity> reservedServices = new ArrayList<>();
+
+    @OneToMany(mappedBy = "reservation", cascade = CascadeType.ALL, orphanRemoval = true)
+    @OrderBy("id ASC")
+    private List<CompanionEntity> companions = new ArrayList<>();
 
     protected ReservationEntity() {
         // JPA
@@ -101,8 +129,11 @@ public class ReservationEntity {
                               String reservationStatus, String paymentStatus, String paymentMethod,
                               Instant createdAt, BigDecimal pendingTransferAmount, String transferSupportReference,
                               String cancellationReason, String cancelledBy, Instant cancelledAt,
-                              BigDecimal refundedAmount, String refundReason, String refundedBy,
-                              String refundMethod, Instant refundedAt, String finalizedBy, Instant finalizedAt) {
+                              String refundDecisionStatus, String refundAuthorizedBy, Instant refundAuthorizedAt,
+                              String refundAuthorizationNote, String refundRejectedBy, Instant refundRejectedAt,
+                              String refundRejectionReason, BigDecimal refundedAmount, String refundReason,
+                              String refundedBy, String refundMethod, Instant refundedAt, String finalizedBy,
+                              Instant finalizedAt, String holderDocument) {
         this.reservationId = reservationId;
         this.tenantId = tenantId;
         this.customerId = customerId;
@@ -119,6 +150,13 @@ public class ReservationEntity {
         this.cancellationReason = cancellationReason;
         this.cancelledBy = cancelledBy;
         this.cancelledAt = cancelledAt;
+        this.refundDecisionStatus = refundDecisionStatus;
+        this.refundAuthorizedBy = refundAuthorizedBy;
+        this.refundAuthorizedAt = refundAuthorizedAt;
+        this.refundAuthorizationNote = refundAuthorizationNote;
+        this.refundRejectedBy = refundRejectedBy;
+        this.refundRejectedAt = refundRejectedAt;
+        this.refundRejectionReason = refundRejectionReason;
         this.refundedAmount = refundedAmount;
         this.refundReason = refundReason;
         this.refundedBy = refundedBy;
@@ -126,6 +164,7 @@ public class ReservationEntity {
         this.refundedAt = refundedAt;
         this.finalizedBy = finalizedBy;
         this.finalizedAt = finalizedAt;
+        this.holderDocument = holderDocument;
     }
 
     /**
@@ -138,8 +177,11 @@ public class ReservationEntity {
                              String reservationStatus, String paymentStatus, String paymentMethod,
                              BigDecimal pendingTransferAmount, String transferSupportReference,
                              String cancellationReason, String cancelledBy, Instant cancelledAt,
-                             BigDecimal refundedAmount, String refundReason, String refundedBy,
-                             String refundMethod, Instant refundedAt, String finalizedBy, Instant finalizedAt) {
+                             String refundDecisionStatus, String refundAuthorizedBy, Instant refundAuthorizedAt,
+                             String refundAuthorizationNote, String refundRejectedBy, Instant refundRejectedAt,
+                             String refundRejectionReason, BigDecimal refundedAmount, String refundReason,
+                             String refundedBy, String refundMethod, Instant refundedAt, String finalizedBy,
+                             Instant finalizedAt) {
         this.finalValue = finalValue;
         this.pendingBalance = pendingBalance;
         this.creditBalance = creditBalance;
@@ -151,6 +193,13 @@ public class ReservationEntity {
         this.cancellationReason = cancellationReason;
         this.cancelledBy = cancelledBy;
         this.cancelledAt = cancelledAt;
+        this.refundDecisionStatus = refundDecisionStatus;
+        this.refundAuthorizedBy = refundAuthorizedBy;
+        this.refundAuthorizedAt = refundAuthorizedAt;
+        this.refundAuthorizationNote = refundAuthorizationNote;
+        this.refundRejectedBy = refundRejectedBy;
+        this.refundRejectedAt = refundRejectedAt;
+        this.refundRejectionReason = refundRejectionReason;
         this.refundedAmount = refundedAmount;
         this.refundReason = refundReason;
         this.refundedBy = refundedBy;
@@ -163,6 +212,11 @@ public class ReservationEntity {
     public void addReservedService(ReservedServiceEntity reservedService) {
         reservedService.assignTo(this);
         this.reservedServices.add(reservedService);
+    }
+
+    public void addCompanion(CompanionEntity companion) {
+        companion.assignTo(this);
+        this.companions.add(companion);
     }
 
     public UUID getReservationId() {
@@ -229,6 +283,34 @@ public class ReservationEntity {
         return cancelledAt;
     }
 
+    public String getRefundDecisionStatus() {
+        return refundDecisionStatus;
+    }
+
+    public String getRefundAuthorizedBy() {
+        return refundAuthorizedBy;
+    }
+
+    public Instant getRefundAuthorizedAt() {
+        return refundAuthorizedAt;
+    }
+
+    public String getRefundAuthorizationNote() {
+        return refundAuthorizationNote;
+    }
+
+    public String getRefundRejectedBy() {
+        return refundRejectedBy;
+    }
+
+    public Instant getRefundRejectedAt() {
+        return refundRejectedAt;
+    }
+
+    public String getRefundRejectionReason() {
+        return refundRejectionReason;
+    }
+
     public BigDecimal getRefundedAmount() {
         return refundedAmount;
     }
@@ -259,5 +341,13 @@ public class ReservationEntity {
 
     public List<ReservedServiceEntity> getReservedServices() {
         return reservedServices;
+    }
+
+    public String getHolderDocument() {
+        return holderDocument;
+    }
+
+    public List<CompanionEntity> getCompanions() {
+        return companions;
     }
 }

@@ -39,7 +39,9 @@ public class CreateReservationService implements CreateReservationUseCase {
                 tenant.tenantId(),
                 command.customerId(),
                 command.projectedValue(),
-                command.reservedServices());
+                command.reservedServices(),
+                command.holderDocument(),
+                command.companions());
 
         return reservationRepositoryPort.save(reservation);
     }

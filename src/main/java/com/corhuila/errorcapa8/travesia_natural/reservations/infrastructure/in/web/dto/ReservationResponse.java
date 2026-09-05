@@ -13,9 +13,13 @@ public record ReservationResponse(UUID reservationId, String tenantId, String cu
                                    String reservationStatus, String paymentStatus, String paymentMethod,
                                    Instant createdAt, BigDecimal pendingTransferAmount,
                                    String transferSupportReference, String cancellationReason, String cancelledBy,
-                                   Instant cancelledAt, BigDecimal refundedAmount, String refundReason,
+                                   Instant cancelledAt, String refundDecisionStatus, String refundAuthorizedBy,
+                                   Instant refundAuthorizedAt, String refundAuthorizationNote,
+                                   String refundRejectedBy, Instant refundRejectedAt, String refundRejectionReason,
+                                   BigDecimal refundedAmount, String refundReason,
                                    String refundedBy, String refundMethod, Instant refundedAt, String finalizedBy,
-                                   Instant finalizedAt) {
+                                   Instant finalizedAt, String holderDocument,
+                                   List<CompanionResponse> companions) {
 
     public static ReservationResponse from(Reservation reservation) {
         return new ReservationResponse(
@@ -36,12 +40,21 @@ public record ReservationResponse(UUID reservationId, String tenantId, String cu
                 reservation.cancellationReason(),
                 reservation.cancelledBy(),
                 reservation.cancelledAt(),
+                reservation.refundDecisionStatus() == null ? null : reservation.refundDecisionStatus().label(),
+                reservation.refundAuthorizedBy(),
+                reservation.refundAuthorizedAt(),
+                reservation.refundAuthorizationNote(),
+                reservation.refundRejectedBy(),
+                reservation.refundRejectedAt(),
+                reservation.refundRejectionReason(),
                 reservation.refundedAmount(),
                 reservation.refundReason(),
                 reservation.refundedBy(),
                 reservation.refundMethod(),
                 reservation.refundedAt(),
                 reservation.finalizedBy(),
-                reservation.finalizedAt());
+                reservation.finalizedAt(),
+                reservation.holderDocument(),
+                reservation.companions().stream().map(CompanionResponse::from).toList());
     }
 }

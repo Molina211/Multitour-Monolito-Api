@@ -1,6 +1,8 @@
 package com.corhuila.errorcapa8.travesia_natural.reservations.infrastructure.out.persistence;
 
+import com.corhuila.errorcapa8.travesia_natural.reservations.domain.model.Companion;
 import com.corhuila.errorcapa8.travesia_natural.reservations.domain.model.PaymentStatus;
+import com.corhuila.errorcapa8.travesia_natural.reservations.domain.model.RefundDecisionStatus;
 import com.corhuila.errorcapa8.travesia_natural.reservations.domain.model.Reservation;
 import com.corhuila.errorcapa8.travesia_natural.reservations.domain.model.ReservationStatus;
 import com.corhuila.errorcapa8.travesia_natural.reservations.domain.model.ReservedService;
@@ -54,6 +56,13 @@ public class ReservationRepositoryAdapter implements ReservationRepositoryPort {
                 reservation.cancellationReason(),
                 reservation.cancelledBy(),
                 reservation.cancelledAt(),
+                reservation.refundDecisionStatus() == null ? null : reservation.refundDecisionStatus().label(),
+                reservation.refundAuthorizedBy(),
+                reservation.refundAuthorizedAt(),
+                reservation.refundAuthorizationNote(),
+                reservation.refundRejectedBy(),
+                reservation.refundRejectedAt(),
+                reservation.refundRejectionReason(),
                 reservation.refundedAmount(),
                 reservation.refundReason(),
                 reservation.refundedBy(),
@@ -83,13 +92,21 @@ public class ReservationRepositoryAdapter implements ReservationRepositoryPort {
                 reservation.cancellationReason(),
                 reservation.cancelledBy(),
                 reservation.cancelledAt(),
+                reservation.refundDecisionStatus() == null ? null : reservation.refundDecisionStatus().label(),
+                reservation.refundAuthorizedBy(),
+                reservation.refundAuthorizedAt(),
+                reservation.refundAuthorizationNote(),
+                reservation.refundRejectedBy(),
+                reservation.refundRejectedAt(),
+                reservation.refundRejectionReason(),
                 reservation.refundedAmount(),
                 reservation.refundReason(),
                 reservation.refundedBy(),
                 reservation.refundMethod(),
                 reservation.refundedAt(),
                 reservation.finalizedBy(),
-                reservation.finalizedAt());
+                reservation.finalizedAt(),
+                reservation.holderDocument());
 
         for (ReservedService reservedService : reservation.reservedServices()) {
             entity.addReservedService(new ReservedServiceEntity(
@@ -97,6 +114,14 @@ public class ReservationRepositoryAdapter implements ReservationRepositoryPort {
                     reservedService.serviceReference(),
                     reservedService.partySize(),
                     reservedService.scheduledDate()));
+        }
+
+        for (Companion companion : reservation.companions()) {
+            entity.addCompanion(new CompanionEntity(
+                    reservation.tenantId(),
+                    companion.name(),
+                    companion.document(),
+                    companion.birthDate()));
         }
 
         return entity;
@@ -130,6 +155,10 @@ public class ReservationRepositoryAdapter implements ReservationRepositoryPort {
                 .map(rs -> new ReservedService(rs.getServiceReference(), rs.getPartySize(), rs.getScheduledDate()))
                 .toList();
 
+        List<Companion> companions = entity.getCompanions().stream()
+                .map(c -> new Companion(c.getName(), c.getDocument(), c.getBirthDate()))
+                .toList();
+
         return Reservation.reconstitute(
                 entity.getReservationId(),
                 entity.getTenantId(),
@@ -148,12 +177,21 @@ public class ReservationRepositoryAdapter implements ReservationRepositoryPort {
                 entity.getCancellationReason(),
                 entity.getCancelledBy(),
                 entity.getCancelledAt(),
+                entity.getRefundDecisionStatus() == null ? null : RefundDecisionStatus.fromLabel(entity.getRefundDecisionStatus()),
+                entity.getRefundAuthorizedBy(),
+                entity.getRefundAuthorizedAt(),
+                entity.getRefundAuthorizationNote(),
+                entity.getRefundRejectedBy(),
+                entity.getRefundRejectedAt(),
+                entity.getRefundRejectionReason(),
                 entity.getRefundedAmount(),
                 entity.getRefundReason(),
                 entity.getRefundedBy(),
                 entity.getRefundMethod(),
                 entity.getRefundedAt(),
                 entity.getFinalizedBy(),
-                entity.getFinalizedAt());
+                entity.getFinalizedAt(),
+                entity.getHolderDocument(),
+                companions);
     }
 }

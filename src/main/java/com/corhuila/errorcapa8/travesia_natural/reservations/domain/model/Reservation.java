@@ -2,6 +2,7 @@ package com.corhuila.errorcapa8.travesia_natural.reservations.domain.model;
 
 import com.corhuila.errorcapa8.travesia_natural.reservations.domain.exception.InvalidReservationException;
 import com.corhuila.errorcapa8.travesia_natural.reservations.domain.exception.PaymentAlreadyResolvedException;
+import com.corhuila.errorcapa8.travesia_natural.reservations.domain.exception.RefundNotAuthorizedException;
 import com.corhuila.errorcapa8.travesia_natural.reservations.domain.exception.ReservationNotCancellableException;
 import com.corhuila.errorcapa8.travesia_natural.reservations.domain.exception.ReservationNotExecutableException;
 import com.corhuila.errorcapa8.travesia_natural.reservations.domain.exception.ReservationNotFinalizableException;
@@ -9,7 +10,10 @@ import com.corhuila.errorcapa8.travesia_natural.reservations.domain.exception.Re
 
 import java.math.BigDecimal;
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 import java.util.UUID;
 
 /**
@@ -36,6 +40,13 @@ public final class Reservation {
     private final String cancellationReason;
     private final String cancelledBy;
     private final Instant cancelledAt;
+    private final RefundDecisionStatus refundDecisionStatus;
+    private final String refundAuthorizedBy;
+    private final Instant refundAuthorizedAt;
+    private final String refundAuthorizationNote;
+    private final String refundRejectedBy;
+    private final Instant refundRejectedAt;
+    private final String refundRejectionReason;
     private final BigDecimal refundedAmount;
     private final String refundReason;
     private final String refundedBy;
@@ -43,6 +54,8 @@ public final class Reservation {
     private final Instant refundedAt;
     private final String finalizedBy;
     private final Instant finalizedAt;
+    private final String holderDocument;
+    private final List<Companion> companions;
 
     private Reservation(UUID reservationId, String tenantId, String customerId,
                          List<ReservedService> reservedServices, BigDecimal projectedValue,
@@ -50,9 +63,12 @@ public final class Reservation {
                          ReservationStatus reservationStatus, PaymentStatus paymentStatus,
                          String paymentMethod, Instant createdAt, BigDecimal pendingTransferAmount,
                          String transferSupportReference, String cancellationReason, String cancelledBy,
-                         Instant cancelledAt, BigDecimal refundedAmount, String refundReason,
-                         String refundedBy, String refundMethod, Instant refundedAt,
-                         String finalizedBy, Instant finalizedAt) {
+                         Instant cancelledAt, RefundDecisionStatus refundDecisionStatus,
+                         String refundAuthorizedBy, Instant refundAuthorizedAt, String refundAuthorizationNote,
+                         String refundRejectedBy, Instant refundRejectedAt, String refundRejectionReason,
+                         BigDecimal refundedAmount, String refundReason, String refundedBy, String refundMethod,
+                         Instant refundedAt, String finalizedBy, Instant finalizedAt, String holderDocument,
+                         List<Companion> companions) {
         this.reservationId = reservationId;
         this.tenantId = tenantId;
         this.customerId = customerId;
@@ -70,6 +86,13 @@ public final class Reservation {
         this.cancellationReason = cancellationReason;
         this.cancelledBy = cancelledBy;
         this.cancelledAt = cancelledAt;
+        this.refundDecisionStatus = refundDecisionStatus;
+        this.refundAuthorizedBy = refundAuthorizedBy;
+        this.refundAuthorizedAt = refundAuthorizedAt;
+        this.refundAuthorizationNote = refundAuthorizationNote;
+        this.refundRejectedBy = refundRejectedBy;
+        this.refundRejectedAt = refundRejectedAt;
+        this.refundRejectionReason = refundRejectionReason;
         this.refundedAmount = refundedAmount;
         this.refundReason = refundReason;
         this.refundedBy = refundedBy;
@@ -77,6 +100,8 @@ public final class Reservation {
         this.refundedAt = refundedAt;
         this.finalizedBy = finalizedBy;
         this.finalizedAt = finalizedAt;
+        this.holderDocument = holderDocument;
+        this.companions = companions;
     }
 
     /**
@@ -85,7 +110,8 @@ public final class Reservation {
      * decision), not by this factory, so it can be known before persistence.
      */
     public static Reservation create(UUID reservationId, String tenantId, String customerId,
-                                      BigDecimal projectedValue, List<ReservedService> reservedServices) {
+                                      BigDecimal projectedValue, List<ReservedService> reservedServices,
+                                      String holderDocument, List<Companion> companions) {
         if (tenantId == null || tenantId.isBlank()) {
             throw new InvalidReservationException("tenantId is required");
         }
@@ -98,6 +124,8 @@ public final class Reservation {
         if (projectedValue == null || projectedValue.signum() < 0) {
             throw new InvalidReservationException("projectedValue must be a non-negative amount");
         }
+        List<Companion> safeCompanions = companions == null ? List.of() : List.copyOf(companions);
+        requireNoDuplicateDocuments(holderDocument, safeCompanions);
 
         return new Reservation(
                 reservationId,
@@ -123,7 +151,45 @@ public final class Reservation {
                 null,
                 null,
                 null,
-                null);
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                holderDocument,
+                safeCompanions);
+    }
+
+    /**
+     * RN-RES-005: el documento del titular no puede repetirse con el de ningún
+     * acompañante, ni un acompañante repetir el documento de otro, dentro de la misma
+     * reserva. La comparación normaliza (mismo criterio que ya usa el Frontend en
+     * {@code normalizeDocument()}: trim, minúsculas, solo alfanumérico) para que
+     * variaciones de formato del mismo documento cuenten como duplicado; el valor
+     * guardado no se modifica.
+     */
+    private static void requireNoDuplicateDocuments(String holderDocument, List<Companion> companions) {
+        List<String> normalizedDocuments = new ArrayList<>();
+        if (holderDocument != null && !holderDocument.isBlank()) {
+            normalizedDocuments.add(normalizeDocument(holderDocument));
+        }
+        for (Companion companion : companions) {
+            normalizedDocuments.add(normalizeDocument(companion.document()));
+        }
+        Set<String> seen = new HashSet<>();
+        for (String document : normalizedDocuments) {
+            if (!seen.add(document)) {
+                throw new InvalidReservationException(
+                        "duplicate document within the same reservation is not allowed (RN-RES-005)");
+            }
+        }
+    }
+
+    private static String normalizeDocument(String value) {
+        return value.trim().toLowerCase().replaceAll("[^a-z0-9]", "");
     }
 
     /**
@@ -137,13 +203,19 @@ public final class Reservation {
                                             PaymentStatus paymentStatus, String paymentMethod, Instant createdAt,
                                             BigDecimal pendingTransferAmount, String transferSupportReference,
                                             String cancellationReason, String cancelledBy, Instant cancelledAt,
-                                            BigDecimal refundedAmount, String refundReason, String refundedBy,
-                                            String refundMethod, Instant refundedAt, String finalizedBy,
-                                            Instant finalizedAt) {
+                                            RefundDecisionStatus refundDecisionStatus, String refundAuthorizedBy,
+                                            Instant refundAuthorizedAt, String refundAuthorizationNote,
+                                            String refundRejectedBy, Instant refundRejectedAt,
+                                            String refundRejectionReason, BigDecimal refundedAmount,
+                                            String refundReason, String refundedBy, String refundMethod,
+                                            Instant refundedAt, String finalizedBy, Instant finalizedAt,
+                                            String holderDocument, List<Companion> companions) {
         return new Reservation(reservationId, tenantId, customerId, reservedServices, projectedValue, finalValue,
                 pendingBalance, creditBalance, reservationStatus, paymentStatus, paymentMethod, createdAt,
                 pendingTransferAmount, transferSupportReference, cancellationReason, cancelledBy, cancelledAt,
-                refundedAmount, refundReason, refundedBy, refundMethod, refundedAt, finalizedBy, finalizedAt);
+                refundDecisionStatus, refundAuthorizedBy, refundAuthorizedAt, refundAuthorizationNote,
+                refundRejectedBy, refundRejectedAt, refundRejectionReason, refundedAmount, refundReason, refundedBy,
+                refundMethod, refundedAt, finalizedBy, finalizedAt, holderDocument, companions);
     }
 
     /**
@@ -159,7 +231,8 @@ public final class Reservation {
         }
         return new Reservation(reservationId, tenantId, customerId, reservedServices, projectedValue, finalValue,
                 BigDecimal.ZERO, creditBalance, ReservationStatus.CONFIRMADA, PaymentStatus.PAGADO, "Efectivo",
-                createdAt, null, null, null, null, null, null, null, null, null, null, null, null);
+                createdAt, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null,
+                null, null, null, null, holderDocument, companions);
     }
 
     /**
@@ -177,7 +250,8 @@ public final class Reservation {
                 newPendingBalance, creditBalance,
                 settled ? ReservationStatus.CONFIRMADA : reservationStatus,
                 settled ? PaymentStatus.PAGADO : PaymentStatus.PARCIAL,
-                "Abono", createdAt, null, null, null, null, null, null, null, null, null, null, null, null);
+                "Abono", createdAt, null, null, null, null, null, null, null, null, null, null, null, null, null,
+                null, null, null, null, null, null, holderDocument, companions);
     }
 
     /**
@@ -195,7 +269,8 @@ public final class Reservation {
         }
         return new Reservation(reservationId, tenantId, customerId, reservedServices, projectedValue, finalValue,
                 pendingBalance, creditBalance, reservationStatus, PaymentStatus.EN_VALIDACION, "Transferencia",
-                createdAt, amount, supportReference, null, null, null, null, null, null, null, null, null, null);
+                createdAt, amount, supportReference, null, null, null, null, null, null, null, null, null, null,
+                null, null, null, null, null, null, null, holderDocument, companions);
     }
 
     /**
@@ -210,7 +285,7 @@ public final class Reservation {
         return new Reservation(reservationId, tenantId, customerId, reservedServices, projectedValue, finalValue,
                 pendingBalance, creditBalance, reservationStatus, paymentStatus, paymentMethod, createdAt,
                 pendingTransferAmount, transferSupportReference, null, null, null, null, null, null, null, null,
-                null, null)
+                null, null, null, null, null, null, null, null, null, holderDocument, companions)
                 .registerInstallmentPayment(pendingTransferAmount);
     }
 
@@ -225,7 +300,8 @@ public final class Reservation {
         }
         return new Reservation(reservationId, tenantId, customerId, reservedServices, projectedValue, finalValue,
                 pendingBalance, creditBalance, reservationStatus, PaymentStatus.RECHAZADO, paymentMethod,
-                createdAt, null, null, null, null, null, null, null, null, null, null, null, null);
+                createdAt, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null,
+                null, null, null, null, holderDocument, companions);
     }
 
     /**
@@ -243,7 +319,7 @@ public final class Reservation {
         return new Reservation(reservationId, tenantId, customerId, reservedServices, projectedValue, finalValue,
                 pendingBalance, creditBalance, ReservationStatus.EN_EJECUCION, paymentStatus, paymentMethod,
                 createdAt, pendingTransferAmount, transferSupportReference, null, null, null, null, null, null,
-                null, null, null, null);
+                null, null, null, null, null, null, null, null, null, null, null, holderDocument, companions);
     }
 
     /**
@@ -251,8 +327,9 @@ public final class Reservation {
      * `PendienteDePago` o `Confirmada`, y solo si no hay una transferencia en espera de
      * aprobación/rechazo (esa decisión debe resolverse primero, spec 009). Si ya se
      * había recibido dinero (`finalValue - pendingBalance > 0`), ese monto queda como
-     * saldo a favor pendiente de devolución (spec futura 012); si no hubo ningún pago,
-     * no se genera saldo a favor.
+     * saldo a favor pendiente de devolución y la solicitud de devolución nace en
+     * `PENDIENTE_AUTORIZACION` (spec 019, RN-RES-008); si no hubo ningún pago, no se
+     * genera saldo a favor ni solicitud de devolución.
      */
     public Reservation cancel(String reason, String actorId) {
         if (reason == null || reason.isBlank()) {
@@ -272,20 +349,64 @@ public final class Reservation {
         BigDecimal newCreditBalance = amountAlreadyPaid.signum() > 0 ? amountAlreadyPaid : creditBalance;
         PaymentStatus newPaymentStatus =
                 amountAlreadyPaid.signum() > 0 ? PaymentStatus.SALDO_A_FAVOR_PENDIENTE : paymentStatus;
+        RefundDecisionStatus newRefundDecisionStatus =
+                amountAlreadyPaid.signum() > 0 ? RefundDecisionStatus.PENDIENTE_AUTORIZACION : null;
         return new Reservation(reservationId, tenantId, customerId, reservedServices, projectedValue, finalValue,
                 pendingBalance, newCreditBalance, ReservationStatus.CANCELADA, newPaymentStatus, paymentMethod,
                 createdAt, pendingTransferAmount, transferSupportReference, reason, actorId, Instant.now(),
-                null, null, null, null, null, null, null);
+                newRefundDecisionStatus, null, null, null, null, null, null,
+                null, null, null, null, null, null, null, holderDocument, companions);
     }
 
     /**
-     * Ejecuta la devolución del saldo a favor generado por una cancelación (spec 012):
-     * solo permitido con `paymentStatus == SALDO_A_FAVOR_PENDIENTE` y `creditBalance >
-     * 0`. Es un paso único (RN-RES-008 separa autorización y ejecución
-     * conceptualmente, pero aquí se cubren en una sola operación, igual que
-     * `cancel()` no separó "solicitar" de "cancelar"): tras ejecutarse, el
-     * `paymentStatus` deja de ser `SALDO_A_FAVOR_PENDIENTE`, así que no admite una
-     * segunda ejecución sobre el mismo saldo, sea total o parcial.
+     * Autoriza la solicitud de devolución (spec 019, RN-RES-008): solo permitido desde
+     * `PENDIENTE_AUTORIZACION`. La validación de que el actor tenga rol `ADMINISTRATOR`
+     * es responsabilidad de la capa de aplicación (necesita resolver el `Membership`),
+     * no de este método.
+     */
+    public Reservation authorizeRefund(String actorId, String note) {
+        if (actorId == null || actorId.isBlank()) {
+            throw new InvalidReservationException("refund authorization actorId is required");
+        }
+        if (note == null || note.isBlank()) {
+            throw new InvalidReservationException("refund authorization note is required");
+        }
+        requireRefundDecisionStatus(RefundDecisionStatus.PENDIENTE_AUTORIZACION, "authorize");
+        return new Reservation(reservationId, tenantId, customerId, reservedServices, projectedValue, finalValue,
+                pendingBalance, creditBalance, reservationStatus, paymentStatus, paymentMethod, createdAt,
+                pendingTransferAmount, transferSupportReference, cancellationReason, cancelledBy, cancelledAt,
+                RefundDecisionStatus.AUTORIZADA, actorId, Instant.now(), note, null, null, null,
+                refundedAmount, refundReason, refundedBy, refundMethod, refundedAt, finalizedBy, finalizedAt,
+                holderDocument, companions);
+    }
+
+    /**
+     * Rechaza la solicitud de devolución (spec 019): solo permitido desde
+     * `PENDIENTE_AUTORIZACION`. No modifica `paymentStatus` ni `creditBalance` — el
+     * saldo a favor sigue pendiente, solo cambia el estado de la decisión.
+     */
+    public Reservation rejectRefund(String actorId, String reason) {
+        if (actorId == null || actorId.isBlank()) {
+            throw new InvalidReservationException("refund rejection actorId is required");
+        }
+        if (reason == null || reason.isBlank()) {
+            throw new InvalidReservationException("refund rejection reason is required");
+        }
+        requireRefundDecisionStatus(RefundDecisionStatus.PENDIENTE_AUTORIZACION, "reject");
+        return new Reservation(reservationId, tenantId, customerId, reservedServices, projectedValue, finalValue,
+                pendingBalance, creditBalance, reservationStatus, paymentStatus, paymentMethod, createdAt,
+                pendingTransferAmount, transferSupportReference, cancellationReason, cancelledBy, cancelledAt,
+                RefundDecisionStatus.RECHAZADA, null, null, null, actorId, Instant.now(), reason,
+                refundedAmount, refundReason, refundedBy, refundMethod, refundedAt, finalizedBy, finalizedAt,
+                holderDocument, companions);
+    }
+
+    /**
+     * Ejecuta la devolución del saldo a favor con salida real de dinero (spec 012,
+     * ampliado por spec 019/RN-RES-008): exige que la solicitud ya esté `AUTORIZADA` —
+     * sin autorización previa trazable no se permite ejecutar. Es un paso único: tras
+     * ejecutarse, `refundDecisionStatus` pasa a `EJECUTADA` y no admite una segunda
+     * ejecución sobre el mismo saldo, sea total o parcial.
      */
     public Reservation refund(BigDecimal amount, String reason, String actorId, String method) {
         if (reason == null || reason.isBlank()) {
@@ -299,6 +420,7 @@ public final class Reservation {
                     "reservation must have a pending credit balance to be refunded, current paymentStatus: "
                             + paymentStatus.label() + " (reservation: " + reservationId + ")");
         }
+        requireRefundDecisionStatus(RefundDecisionStatus.AUTORIZADA, "execute");
         if (amount == null || amount.signum() <= 0) {
             throw new InvalidReservationException("refund amount must be a positive value");
         }
@@ -310,7 +432,39 @@ public final class Reservation {
         return new Reservation(reservationId, tenantId, customerId, reservedServices, projectedValue, finalValue,
                 pendingBalance, newCreditBalance, reservationStatus, PaymentStatus.DEVUELTO_PARCIAL_O_TOTAL,
                 paymentMethod, createdAt, pendingTransferAmount, transferSupportReference, cancellationReason,
-                cancelledBy, cancelledAt, amount, reason, actorId, method, Instant.now(), finalizedBy, finalizedAt);
+                cancelledBy, cancelledAt, RefundDecisionStatus.EJECUTADA, refundAuthorizedBy, refundAuthorizedAt,
+                refundAuthorizationNote, refundRejectedBy, refundRejectedAt, refundRejectionReason,
+                amount, reason, actorId, method, Instant.now(), finalizedBy, finalizedAt, holderDocument, companions);
+    }
+
+    /**
+     * Registra la solicitud de devolución `AUTORIZADA` como saldo a favor pendiente sin
+     * salida efectiva de dinero (spec 019, RN-RES-008: nunca debe marcarse como
+     * `EJECUTADA` si no hay salida real de caja). No modifica `paymentStatus` ni
+     * `creditBalance` — el saldo sigue disponible para una ejecución futura o para
+     * aplicarse a otra reserva (fuera de alcance de esta spec).
+     */
+    public Reservation registerRefundAsCreditBalance(String actorId) {
+        if (actorId == null || actorId.isBlank()) {
+            throw new InvalidReservationException("refund actorId is required");
+        }
+        requireRefundDecisionStatus(RefundDecisionStatus.AUTORIZADA, "register as credit balance");
+        return new Reservation(reservationId, tenantId, customerId, reservedServices, projectedValue, finalValue,
+                pendingBalance, creditBalance, reservationStatus, paymentStatus, paymentMethod, createdAt,
+                pendingTransferAmount, transferSupportReference, cancellationReason, cancelledBy, cancelledAt,
+                RefundDecisionStatus.SALDO_A_FAVOR_REGISTRADO, refundAuthorizedBy, refundAuthorizedAt,
+                refundAuthorizationNote, refundRejectedBy, refundRejectedAt, refundRejectionReason,
+                refundedAmount, refundReason, refundedBy, refundMethod, refundedAt, finalizedBy, finalizedAt,
+                holderDocument, companions);
+    }
+
+    private void requireRefundDecisionStatus(RefundDecisionStatus expected, String action) {
+        if (refundDecisionStatus != expected) {
+            throw new RefundNotAuthorizedException(
+                    "cannot " + action + " refund, current refundDecisionStatus: "
+                            + (refundDecisionStatus == null ? "none" : refundDecisionStatus.label())
+                            + " (reservation: " + reservationId + ")");
+        }
     }
 
     /**
@@ -330,7 +484,8 @@ public final class Reservation {
         return new Reservation(reservationId, tenantId, customerId, reservedServices, projectedValue, finalValue,
                 pendingBalance, creditBalance, ReservationStatus.FINALIZADA, paymentStatus, paymentMethod,
                 createdAt, pendingTransferAmount, transferSupportReference, null, null, null, null, null, null,
-                null, null, actorId, Instant.now());
+                null, null, null, null, null, null, null, null, null, actorId, Instant.now(), holderDocument,
+                companions);
     }
 
     private void validatePaymentAmount(BigDecimal amount) {
@@ -407,6 +562,34 @@ public final class Reservation {
         return cancelledAt;
     }
 
+    public RefundDecisionStatus refundDecisionStatus() {
+        return refundDecisionStatus;
+    }
+
+    public String refundAuthorizedBy() {
+        return refundAuthorizedBy;
+    }
+
+    public Instant refundAuthorizedAt() {
+        return refundAuthorizedAt;
+    }
+
+    public String refundAuthorizationNote() {
+        return refundAuthorizationNote;
+    }
+
+    public String refundRejectedBy() {
+        return refundRejectedBy;
+    }
+
+    public Instant refundRejectedAt() {
+        return refundRejectedAt;
+    }
+
+    public String refundRejectionReason() {
+        return refundRejectionReason;
+    }
+
     public BigDecimal refundedAmount() {
         return refundedAmount;
     }
@@ -433,5 +616,13 @@ public final class Reservation {
 
     public Instant finalizedAt() {
         return finalizedAt;
+    }
+
+    public String holderDocument() {
+        return holderDocument;
+    }
+
+    public List<Companion> companions() {
+        return companions;
     }
 }

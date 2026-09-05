@@ -2388,3 +2388,227 @@ alterado) devolvieron los códigos HTTP y payloads exactos documentados arriba. 
 tercer criterio de aceptación de `spec.md` (finalizar sin `Execution` registrada)
 no se probó en runtime: no existe forma de llegar a ese estado por el flujo
 normal, por la garantía de atomicidad documentada en `plan.md`.
+
+## 018 — Acompañantes individualizados en la reserva
+
+Corresponde a `specs/018-reservation-companions/`. Agrega `holderDocument` y
+`companions` (nombre, documento, fecha de nacimiento) a la creación de reservas
+(mismo endpoint `POST .../reservations` de spec 001), con la invariante RN-RES-005
+(sin documentos repetidos dentro de la misma reserva) y su reflejo en `GET`. Requiere
+Postgres arriba, la app corriendo, el tenant `travesia-natural` `Activo`, y un token
+válido de `laura.gomez@example.com` (sección "007", pasos 1-2).
+
+```bash
+TOKEN="<accessToken de la sección 007, paso 1>"
+```
+
+### 1. Compilación y tests
+
+```bash
+./mvnw test
+```
+
+Debe mantener `contextLoads` en verde, con la migración a versión 15 confirmada
+(tabla `reservation_companions` y columna `holder_document` en `reservations`).
+
+### 2. Crear una reserva con `holderDocument` y `companions` sin duplicados (`201`)
+
+```bash
+curl -s -X POST http://localhost:8080/api/tenants/travesia-natural/reservations \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer ${TOKEN}" \
+  -d '{
+        "projectedValue": 300000,
+        "reservedServices": [
+          { "serviceReference": "tour-laguna-verde", "partySize": 3, "scheduledDate": "2026-10-20" }
+        ],
+        "holderDocument": "1001-234567",
+        "companions": [
+          { "name": "Ana Torres", "document": "1002345678", "birthDate": "1998-05-12" },
+          { "name": "Luis Torres", "document": "1003456789", "birthDate": "2015-03-01" }
+        ]
+      }'
+```
+
+Se espera `201 Created` con `holderDocument: "1001-234567"` y `companions` con los
+dos registros completos (`name`, `document`, `birthDate`). Guardar el
+`reservationId` devuelto como `RES_S`.
+
+### 3. Crear una reserva sin `holderDocument` ni `companions` (`201`, compatibilidad)
+
+```bash
+curl -i -X POST http://localhost:8080/api/tenants/travesia-natural/reservations \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer ${TOKEN}" \
+  -d '{ "projectedValue": 150000, "reservedServices": [{ "serviceReference": "tour-laguna-verde", "partySize": 1, "scheduledDate": "2026-10-21" }] }'
+```
+
+Se espera `201 Created`, igual que antes de esta spec, con `holderDocument: null` y
+`companions: []`.
+
+### 4. Documento de un acompañante igual al `holderDocument` (`400`, RN-RES-005)
+
+```bash
+curl -i -X POST http://localhost:8080/api/tenants/travesia-natural/reservations \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer ${TOKEN}" \
+  -d '{
+        "projectedValue": 150000,
+        "reservedServices": [{ "serviceReference": "tour-laguna-verde", "partySize": 2, "scheduledDate": "2026-10-22" }],
+        "holderDocument": "1001-234567",
+        "companions": [{ "name": "Duplicado Titular", "document": "1001234567", "birthDate": "1990-01-01" }]
+      }'
+```
+
+Se espera `400 Bad Request` con `{"error":"validation_error", ...}` — nótese que
+`"1001-234567"` y `"1001234567"` se normalizan al mismo valor (trim, minúsculas,
+solo alfanumérico) y cuentan como el mismo documento. No debe quedar reserva creada.
+
+### 5. Dos acompañantes con el mismo documento (`400`, RN-RES-005)
+
+```bash
+curl -i -X POST http://localhost:8080/api/tenants/travesia-natural/reservations \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer ${TOKEN}" \
+  -d '{
+        "projectedValue": 150000,
+        "reservedServices": [{ "serviceReference": "tour-laguna-verde", "partySize": 2, "scheduledDate": "2026-10-22" }],
+        "companions": [
+          { "name": "Acompanante Uno", "document": "9998887777", "birthDate": "1990-01-01" },
+          { "name": "Acompanante Dos", "document": "9998887777", "birthDate": "1991-02-02" }
+        ]
+      }'
+```
+
+Se espera `400 Bad Request` con `{"error":"validation_error", ...}`. No debe quedar
+reserva creada.
+
+### 6. `GET` de la reserva refleja `holderDocument` y `companions` (`200`)
+
+```bash
+curl -s http://localhost:8080/api/tenants/travesia-natural/reservations/${RES_S}
+```
+
+Se espera `200 OK` con `holderDocument` y `companions` idénticos a los enviados en
+el paso 2. Repetir con el listado (`GET .../reservations`) y confirmar que `RES_S`
+aparece con los mismos datos.
+
+Ejecutado el 2026-09-05 contra la base de desarrollo local (mismo Postgres
+`multitour-postgres`, tenant `travesia-natural`, cliente `laura.gomez@example.com`
+existente). La migración V15 requirió una corrección: la primera versión creaba
+`reservation_companions.tenant_id` como `UUID`, inconsistente con el `VARCHAR(50)`
+que `tenant_id` usa en el resto del esquema desde `V5` — Hibernate lo detectó como
+`SchemaManagementException` al validar el esquema en `./mvnw test`. Se corrigió la
+migración a `VARCHAR(50) REFERENCES tenants(tenant_id)` y se revirtió manualmente el
+estado ya aplicado en la base de desarrollo local (sin datos de producción
+afectados) antes de reaplicarla. `./mvnw test` en verde (`contextLoads`, migración a
+versión 15 confirmada) antes de levantar la app. Los 5 pasos de `curl` de esta
+sección (creación con acompañantes válidos, creación sin campos opcionales, rechazo
+por documento duplicado con el titular, rechazo por documento duplicado entre
+acompañantes, y `GET`/listado reflejando los datos guardados) devolvieron los
+códigos HTTP y payloads exactos documentados arriba.
+
+## 019 — Ciclo de vida de la solicitud de devolución (Refund)
+
+Corresponde a `specs/019-refund-request-lifecycle/`. Agrega el estado
+`refundDecisionStatus` (RN-RES-008) a `Reservation`:
+`PENDIENTE_AUTORIZACION → AUTORIZADA/RECHAZADA → EJECUTADA/SALDO_A_FAVOR_REGISTRADO`,
+con tres endpoints nuevos bajo `POST .../reservations/{reservationId}/refund/...`
+(`authorize`, `reject`, `credit-balance`) que solo un `Membership` `ADMINISTRATOR`
+del tenant puede invocar (`actorId` = `membershipId`). Requiere Postgres arriba
+(migración V16, columna `refund_decision_status` y afines) y la app corriendo.
+
+Se creó un tenant de prueba dedicado `spec019-refund-demo` (con su Administrator,
+un colaborador `OPERATIONAL_COLLABORATOR` y un `END_CUSTOMER`) para no interferir
+con los datos de `travesia-natural`.
+
+### 1. Cancelar una reserva pagada deja `refundDecisionStatus: Pendiente de autorizacion`
+
+Reserva creada vía `POST .../reservations` (con token JWT del `END_CUSTOMER`),
+pagada por completo en efectivo (`POST .../payments`) y cancelada
+(`POST .../{reservationId}/cancel`, `actorId` = membershipId del Administrator).
+El `GET` de la reserva confirma `refundDecisionStatus: "Pendiente de autorizacion"`,
+`creditBalance` igual al monto pagado y `paymentStatus: "Saldo a favor pendiente"`.
+
+### 2. Ejecutar el refund sin autorizar (`409`)
+
+```bash
+curl -i -X POST http://localhost:8080/api/tenants/spec019-refund-demo/reservations/{reservationId}/refund \
+  -H "Content-Type: application/json" \
+  -d '{ "amount": 300000, "reason": "Devolucion por cancelacion", "actorId": "<membershipId admin>", "method": "EFECTIVO" }'
+```
+
+Se espera `409 Conflict` con `{"error":"refund_not_authorized", "message":"cannot execute refund, current refundDecisionStatus: Pendiente de autorizacion..."}`.
+
+### 3. Autorizar con un `actorId` `OPERATIONAL_COLLABORATOR` (`403`)
+
+```bash
+curl -i -X POST http://localhost:8080/api/tenants/spec019-refund-demo/reservations/{reservationId}/refund/authorize \
+  -H "Content-Type: application/json" \
+  -d '{ "actorId": "<membershipId colaborador>", "note": "Autorizo devolucion" }'
+```
+
+Se espera `403 Forbidden` con `{"error":"refund_action_not_allowed", "message":"only an ADMINISTRATOR can decide on a refund request, actor role: OPERATIONAL_COLLABORATOR"}`.
+
+### 4. Autorizar con un `actorId` `ADMINISTRATOR` (`200`, `Autorizada`)
+
+```bash
+curl -i -X POST http://localhost:8080/api/tenants/spec019-refund-demo/reservations/{reservationId}/refund/authorize \
+  -H "Content-Type: application/json" \
+  -d '{ "actorId": "<membershipId admin>", "note": "Autorizo devolucion en efectivo" }'
+```
+
+Se espera `200 OK` con `refundDecisionStatus: "Autorizada"`, `refundAuthorizedBy`
+igual al `actorId` y `refundAuthorizedAt`/`refundAuthorizationNote` con los valores
+enviados. Reintentar la autorización sobre la misma reserva ya `Autorizada` devuelve
+`409 refund_not_authorized` (idempotencia confirmada).
+
+### 5. Ejecutar el refund ya autorizado (`200`, `Ejecutada`)
+
+```bash
+curl -i -X POST http://localhost:8080/api/tenants/spec019-refund-demo/reservations/{reservationId}/refund \
+  -H "Content-Type: application/json" \
+  -d '{ "amount": 300000, "reason": "Devolucion por cancelacion", "actorId": "<membershipId admin>", "method": "EFECTIVO" }'
+```
+
+Se espera `200 OK` con `refundDecisionStatus: "Ejecutada"`, `refundedAmount: 300000`,
+`refundReason`, `refundMethod` y `refundedAt` con los valores enviados/generados, y
+`paymentStatus: "Devuelto parcial o total"`.
+
+### 6. Repetir 1-4 y registrar el refund como saldo a favor (`200`, `Saldo a favor pendiente`)
+
+Con una segunda reserva (creada, pagada, cancelada y autorizada igual que en los
+pasos 1 y 4):
+
+```bash
+curl -i -X POST http://localhost:8080/api/tenants/spec019-refund-demo/reservations/{reservationId}/refund/credit-balance \
+  -H "Content-Type: application/json" \
+  -d '{ "actorId": "<membershipId admin>" }'
+```
+
+Se espera `200 OK` con `refundDecisionStatus: "Saldo a favor pendiente"` (label de
+`SALDO_A_FAVOR_REGISTRADO`), sin tocar `paymentStatus` ni `creditBalance` (quedan
+igual que tras la cancelación).
+
+### 7. Repetir el paso 1 y rechazar en vez de autorizar (`200`, `Rechazada`) — luego `409` al ejecutar
+
+Con una tercera reserva (creada, pagada y cancelada igual que en el paso 1):
+
+```bash
+curl -i -X POST http://localhost:8080/api/tenants/spec019-refund-demo/reservations/{reservationId}/refund/reject \
+  -H "Content-Type: application/json" \
+  -d '{ "actorId": "<membershipId admin>", "reason": "Motivo de cancelacion no cumple politica de devolucion" }'
+```
+
+Se espera `200 OK` con `refundDecisionStatus: "Rechazada"`, `refundRejectedBy`,
+`refundRejectedAt` y `refundRejectionReason` con los valores enviados, sin tocar
+`paymentStatus`/`creditBalance`. Intentar ejecutar el refund después
+(`POST .../refund`) sobre esa misma reserva devuelve `409 Conflict` con
+`{"error":"refund_not_authorized", "message":"cannot execute refund, current refundDecisionStatus: Rechazada..."}`.
+
+Ejecutado el 2026-09-05 contra la base de desarrollo local (mismo Postgres
+`multitour-postgres`, migración V16 aplicada, tenant de prueba
+`spec019-refund-demo` con Administrator, colaborador y End Customer creados para la
+ocasión). Los 7 pasos anteriores devolvieron los códigos HTTP y payloads exactos
+documentados arriba, incluyendo la validación adicional de idempotencia del paso 4
+(reintentar `authorize` sobre una reserva ya `Autorizada` devuelve `409`).

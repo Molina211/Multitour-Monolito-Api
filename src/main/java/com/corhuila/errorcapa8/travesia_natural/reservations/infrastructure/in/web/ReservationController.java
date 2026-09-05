@@ -2,13 +2,18 @@ package com.corhuila.errorcapa8.travesia_natural.reservations.infrastructure.in.
 
 import com.corhuila.errorcapa8.travesia_natural.common.security.JwtPrincipal;
 import com.corhuila.errorcapa8.travesia_natural.reservations.domain.exception.InvalidReservationException;
+import com.corhuila.errorcapa8.travesia_natural.reservations.domain.exception.RefundActionNotAllowedException;
+import com.corhuila.errorcapa8.travesia_natural.reservations.domain.exception.RefundNotAuthorizedException;
 import com.corhuila.errorcapa8.travesia_natural.reservations.domain.exception.ReservationNotCancellableException;
 import com.corhuila.errorcapa8.travesia_natural.reservations.domain.exception.ReservationNotFinalizableException;
 import com.corhuila.errorcapa8.travesia_natural.reservations.domain.exception.ReservationNotFoundException;
 import com.corhuila.errorcapa8.travesia_natural.reservations.domain.exception.ReservationNotRefundableException;
 import com.corhuila.errorcapa8.travesia_natural.reservations.domain.exception.TenantMismatchException;
+import com.corhuila.errorcapa8.travesia_natural.reservations.domain.model.Companion;
 import com.corhuila.errorcapa8.travesia_natural.reservations.domain.model.Reservation;
 import com.corhuila.errorcapa8.travesia_natural.reservations.domain.model.ReservedService;
+import com.corhuila.errorcapa8.travesia_natural.reservations.domain.port.in.AuthorizeRefundCommand;
+import com.corhuila.errorcapa8.travesia_natural.reservations.domain.port.in.AuthorizeRefundUseCase;
 import com.corhuila.errorcapa8.travesia_natural.reservations.domain.port.in.CancelReservationCommand;
 import com.corhuila.errorcapa8.travesia_natural.reservations.domain.port.in.CancelReservationUseCase;
 import com.corhuila.errorcapa8.travesia_natural.reservations.domain.port.in.CreateReservationCommand;
@@ -17,12 +22,20 @@ import com.corhuila.errorcapa8.travesia_natural.reservations.domain.port.in.Fina
 import com.corhuila.errorcapa8.travesia_natural.reservations.domain.port.in.FinalizeReservationUseCase;
 import com.corhuila.errorcapa8.travesia_natural.reservations.domain.port.in.RefundReservationCommand;
 import com.corhuila.errorcapa8.travesia_natural.reservations.domain.port.in.RefundReservationUseCase;
+import com.corhuila.errorcapa8.travesia_natural.reservations.domain.port.in.RegisterRefundAsCreditBalanceCommand;
+import com.corhuila.errorcapa8.travesia_natural.reservations.domain.port.in.RegisterRefundAsCreditBalanceUseCase;
+import com.corhuila.errorcapa8.travesia_natural.reservations.domain.port.in.RejectRefundCommand;
+import com.corhuila.errorcapa8.travesia_natural.reservations.domain.port.in.RejectRefundUseCase;
 import com.corhuila.errorcapa8.travesia_natural.reservations.domain.port.in.ReservationQueryUseCase;
 import com.corhuila.errorcapa8.travesia_natural.common.web.dto.ErrorResponse;
+import com.corhuila.errorcapa8.travesia_natural.reservations.infrastructure.in.web.dto.AuthorizeRefundRequest;
 import com.corhuila.errorcapa8.travesia_natural.reservations.infrastructure.in.web.dto.CancelReservationRequest;
+import com.corhuila.errorcapa8.travesia_natural.reservations.infrastructure.in.web.dto.CompanionRequest;
 import com.corhuila.errorcapa8.travesia_natural.reservations.infrastructure.in.web.dto.CreateReservationRequest;
 import com.corhuila.errorcapa8.travesia_natural.reservations.infrastructure.in.web.dto.FinalizeReservationRequest;
 import com.corhuila.errorcapa8.travesia_natural.reservations.infrastructure.in.web.dto.RefundReservationRequest;
+import com.corhuila.errorcapa8.travesia_natural.reservations.infrastructure.in.web.dto.RegisterRefundAsCreditBalanceRequest;
+import com.corhuila.errorcapa8.travesia_natural.reservations.infrastructure.in.web.dto.RejectRefundRequest;
 import com.corhuila.errorcapa8.travesia_natural.reservations.infrastructure.in.web.dto.ReservationResponse;
 import com.corhuila.errorcapa8.travesia_natural.reservations.infrastructure.in.web.dto.ReservedServiceRequest;
 import com.corhuila.errorcapa8.travesia_natural.tenants.domain.exception.TenantInactiveException;
@@ -72,17 +85,26 @@ public class ReservationController {
     private final CancelReservationUseCase cancelReservationUseCase;
     private final RefundReservationUseCase refundReservationUseCase;
     private final FinalizeReservationUseCase finalizeReservationUseCase;
+    private final AuthorizeRefundUseCase authorizeRefundUseCase;
+    private final RejectRefundUseCase rejectRefundUseCase;
+    private final RegisterRefundAsCreditBalanceUseCase registerRefundAsCreditBalanceUseCase;
 
     public ReservationController(CreateReservationUseCase createReservationUseCase,
                                   ReservationQueryUseCase reservationQueryUseCase,
                                   CancelReservationUseCase cancelReservationUseCase,
                                   RefundReservationUseCase refundReservationUseCase,
-                                  FinalizeReservationUseCase finalizeReservationUseCase) {
+                                  FinalizeReservationUseCase finalizeReservationUseCase,
+                                  AuthorizeRefundUseCase authorizeRefundUseCase,
+                                  RejectRefundUseCase rejectRefundUseCase,
+                                  RegisterRefundAsCreditBalanceUseCase registerRefundAsCreditBalanceUseCase) {
         this.createReservationUseCase = createReservationUseCase;
         this.reservationQueryUseCase = reservationQueryUseCase;
         this.cancelReservationUseCase = cancelReservationUseCase;
         this.refundReservationUseCase = refundReservationUseCase;
         this.finalizeReservationUseCase = finalizeReservationUseCase;
+        this.authorizeRefundUseCase = authorizeRefundUseCase;
+        this.rejectRefundUseCase = rejectRefundUseCase;
+        this.registerRefundAsCreditBalanceUseCase = registerRefundAsCreditBalanceUseCase;
     }
 
     @PostMapping
@@ -95,9 +117,11 @@ public class ReservationController {
         }
 
         List<ReservedService> reservedServices = toDomainReservedServices(request.reservedServices());
+        List<Companion> companions = toDomainCompanions(request.companions());
 
         CreateReservationCommand command = new CreateReservationCommand(
-                tenantId, principal.membershipId(), request.projectedValue(), reservedServices);
+                tenantId, principal.membershipId(), request.projectedValue(), reservedServices,
+                request.holderDocument(), companions);
 
         Reservation reservation = createReservationUseCase.createReservation(command);
 
@@ -174,6 +198,42 @@ public class ReservationController {
         return ResponseEntity.ok(ReservationResponse.from(reservation));
     }
 
+    @PostMapping("/{reservationId}/refund/authorize")
+    public ResponseEntity<ReservationResponse> authorizeRefund(@PathVariable String tenantId,
+                                                                  @PathVariable UUID reservationId,
+                                                                  @RequestBody AuthorizeRefundRequest request) {
+        AuthorizeRefundCommand command = new AuthorizeRefundCommand(
+                tenantId, reservationId, request.actorId(), request.note());
+
+        Reservation reservation = authorizeRefundUseCase.authorizeRefund(command);
+
+        return ResponseEntity.ok(ReservationResponse.from(reservation));
+    }
+
+    @PostMapping("/{reservationId}/refund/reject")
+    public ResponseEntity<ReservationResponse> rejectRefund(@PathVariable String tenantId,
+                                                                @PathVariable UUID reservationId,
+                                                                @RequestBody RejectRefundRequest request) {
+        RejectRefundCommand command = new RejectRefundCommand(
+                tenantId, reservationId, request.actorId(), request.reason());
+
+        Reservation reservation = rejectRefundUseCase.rejectRefund(command);
+
+        return ResponseEntity.ok(ReservationResponse.from(reservation));
+    }
+
+    @PostMapping("/{reservationId}/refund/credit-balance")
+    public ResponseEntity<ReservationResponse> registerRefundAsCreditBalance(
+            @PathVariable String tenantId, @PathVariable UUID reservationId,
+            @RequestBody RegisterRefundAsCreditBalanceRequest request) {
+        RegisterRefundAsCreditBalanceCommand command = new RegisterRefundAsCreditBalanceCommand(
+                tenantId, reservationId, request.actorId());
+
+        Reservation reservation = registerRefundAsCreditBalanceUseCase.registerRefundAsCreditBalance(command);
+
+        return ResponseEntity.ok(ReservationResponse.from(reservation));
+    }
+
     @PostMapping("/{reservationId}/finalize")
     public ResponseEntity<ReservationResponse> finalize(@PathVariable String tenantId,
                                                            @PathVariable UUID reservationId,
@@ -192,6 +252,15 @@ public class ReservationController {
         }
         return requests.stream()
                 .map(r -> new ReservedService(r.serviceReference(), r.partySize(), r.scheduledDate()))
+                .toList();
+    }
+
+    private List<Companion> toDomainCompanions(List<CompanionRequest> requests) {
+        if (requests == null) {
+            return List.of();
+        }
+        return requests.stream()
+                .map(r -> new Companion(r.name(), r.document(), r.birthDate()))
                 .toList();
     }
 
@@ -225,6 +294,18 @@ public class ReservationController {
     public ResponseEntity<ErrorResponse> handleReservationNotRefundable(ReservationNotRefundableException ex) {
         return ResponseEntity.status(HttpStatus.CONFLICT)
                 .body(new ErrorResponse("reservation_not_refundable", ex.getMessage()));
+    }
+
+    @ExceptionHandler(RefundNotAuthorizedException.class)
+    public ResponseEntity<ErrorResponse> handleRefundNotAuthorized(RefundNotAuthorizedException ex) {
+        return ResponseEntity.status(HttpStatus.CONFLICT)
+                .body(new ErrorResponse("refund_not_authorized", ex.getMessage()));
+    }
+
+    @ExceptionHandler(RefundActionNotAllowedException.class)
+    public ResponseEntity<ErrorResponse> handleRefundActionNotAllowed(RefundActionNotAllowedException ex) {
+        return ResponseEntity.status(HttpStatus.FORBIDDEN)
+                .body(new ErrorResponse("refund_action_not_allowed", ex.getMessage()));
     }
 
     @ExceptionHandler(ReservationNotFinalizableException.class)
