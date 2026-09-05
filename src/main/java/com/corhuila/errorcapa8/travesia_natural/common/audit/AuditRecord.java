@@ -9,11 +9,19 @@ import java.util.UUID;
  * aquí, no solo las de {@code tenants} (spec 002).
  */
 public record AuditRecord(UUID auditRecordId, String tenantId, String actorId, String action,
-                           String affectedRecordId, String reason, Instant recordedAt) {
+                           String affectedRecordId, String reason, Instant recordedAt,
+                           String previousValue, String newValue, String channelOrModule,
+                           String functionalProcessReference) {
 
     public static AuditRecord of(String tenantId, String actorId, String action, String affectedRecordId,
                                   String reason) {
+        return of(tenantId, actorId, action, affectedRecordId, reason, null, null, null, null);
+    }
+
+    public static AuditRecord of(String tenantId, String actorId, String action, String affectedRecordId,
+                                  String reason, String previousValue, String newValue, String channelOrModule,
+                                  String functionalProcessReference) {
         return new AuditRecord(UUID.randomUUID(), tenantId, actorId, action, affectedRecordId, reason,
-                Instant.now());
+                Instant.now(), previousValue, newValue, channelOrModule, functionalProcessReference);
     }
 }

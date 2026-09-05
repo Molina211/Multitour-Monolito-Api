@@ -7,6 +7,7 @@ import com.corhuila.errorcapa8.travesia_natural.reservations.domain.exception.Re
 import com.corhuila.errorcapa8.travesia_natural.reservations.domain.exception.ReservationNotCancellableException;
 import com.corhuila.errorcapa8.travesia_natural.reservations.domain.exception.ReservationNotFinalizableException;
 import com.corhuila.errorcapa8.travesia_natural.reservations.domain.exception.ReservationNotFoundException;
+import com.corhuila.errorcapa8.travesia_natural.reservations.domain.exception.ReservationNotModifiableException;
 import com.corhuila.errorcapa8.travesia_natural.reservations.domain.exception.ReservationNotRefundableException;
 import com.corhuila.errorcapa8.travesia_natural.reservations.domain.exception.TenantMismatchException;
 import com.corhuila.errorcapa8.travesia_natural.reservations.domain.model.Companion;
@@ -20,6 +21,8 @@ import com.corhuila.errorcapa8.travesia_natural.reservations.domain.port.in.Crea
 import com.corhuila.errorcapa8.travesia_natural.reservations.domain.port.in.CreateReservationUseCase;
 import com.corhuila.errorcapa8.travesia_natural.reservations.domain.port.in.FinalizeReservationCommand;
 import com.corhuila.errorcapa8.travesia_natural.reservations.domain.port.in.FinalizeReservationUseCase;
+import com.corhuila.errorcapa8.travesia_natural.reservations.domain.port.in.ModifyReservationCommand;
+import com.corhuila.errorcapa8.travesia_natural.reservations.domain.port.in.ModifyReservationUseCase;
 import com.corhuila.errorcapa8.travesia_natural.reservations.domain.port.in.RefundReservationCommand;
 import com.corhuila.errorcapa8.travesia_natural.reservations.domain.port.in.RefundReservationUseCase;
 import com.corhuila.errorcapa8.travesia_natural.reservations.domain.port.in.RegisterRefundAsCreditBalanceCommand;
@@ -33,6 +36,7 @@ import com.corhuila.errorcapa8.travesia_natural.reservations.infrastructure.in.w
 import com.corhuila.errorcapa8.travesia_natural.reservations.infrastructure.in.web.dto.CompanionRequest;
 import com.corhuila.errorcapa8.travesia_natural.reservations.infrastructure.in.web.dto.CreateReservationRequest;
 import com.corhuila.errorcapa8.travesia_natural.reservations.infrastructure.in.web.dto.FinalizeReservationRequest;
+import com.corhuila.errorcapa8.travesia_natural.reservations.infrastructure.in.web.dto.ModifyReservationRequest;
 import com.corhuila.errorcapa8.travesia_natural.reservations.infrastructure.in.web.dto.RefundReservationRequest;
 import com.corhuila.errorcapa8.travesia_natural.reservations.infrastructure.in.web.dto.RegisterRefundAsCreditBalanceRequest;
 import com.corhuila.errorcapa8.travesia_natural.reservations.infrastructure.in.web.dto.RejectRefundRequest;
@@ -83,6 +87,7 @@ public class ReservationController {
     private final CreateReservationUseCase createReservationUseCase;
     private final ReservationQueryUseCase reservationQueryUseCase;
     private final CancelReservationUseCase cancelReservationUseCase;
+    private final ModifyReservationUseCase modifyReservationUseCase;
     private final RefundReservationUseCase refundReservationUseCase;
     private final FinalizeReservationUseCase finalizeReservationUseCase;
     private final AuthorizeRefundUseCase authorizeRefundUseCase;
@@ -92,6 +97,7 @@ public class ReservationController {
     public ReservationController(CreateReservationUseCase createReservationUseCase,
                                   ReservationQueryUseCase reservationQueryUseCase,
                                   CancelReservationUseCase cancelReservationUseCase,
+                                  ModifyReservationUseCase modifyReservationUseCase,
                                   RefundReservationUseCase refundReservationUseCase,
                                   FinalizeReservationUseCase finalizeReservationUseCase,
                                   AuthorizeRefundUseCase authorizeRefundUseCase,
@@ -100,6 +106,7 @@ public class ReservationController {
         this.createReservationUseCase = createReservationUseCase;
         this.reservationQueryUseCase = reservationQueryUseCase;
         this.cancelReservationUseCase = cancelReservationUseCase;
+        this.modifyReservationUseCase = modifyReservationUseCase;
         this.refundReservationUseCase = refundReservationUseCase;
         this.finalizeReservationUseCase = finalizeReservationUseCase;
         this.authorizeRefundUseCase = authorizeRefundUseCase;
@@ -182,6 +189,21 @@ public class ReservationController {
                 tenantId, reservationId, request.reason(), request.actorId());
 
         Reservation reservation = cancelReservationUseCase.cancelReservation(command);
+
+        return ResponseEntity.ok(ReservationResponse.from(reservation));
+    }
+
+    @PostMapping("/{reservationId}/modify")
+    public ResponseEntity<ReservationResponse> modify(@PathVariable String tenantId,
+                                                          @PathVariable UUID reservationId,
+                                                          @RequestBody ModifyReservationRequest request) {
+        List<ReservedService> reservedServices = toDomainReservedServices(request.reservedServices());
+
+        ModifyReservationCommand command = new ModifyReservationCommand(
+                tenantId, reservationId, reservedServices, request.projectedValue(), request.finalValue(),
+                request.reason(), request.actorId());
+
+        Reservation reservation = modifyReservationUseCase.modifyReservation(command);
 
         return ResponseEntity.ok(ReservationResponse.from(reservation));
     }
@@ -288,6 +310,12 @@ public class ReservationController {
     public ResponseEntity<ErrorResponse> handleReservationNotCancellable(ReservationNotCancellableException ex) {
         return ResponseEntity.status(HttpStatus.CONFLICT)
                 .body(new ErrorResponse("reservation_not_cancellable", ex.getMessage()));
+    }
+
+    @ExceptionHandler(ReservationNotModifiableException.class)
+    public ResponseEntity<ErrorResponse> handleReservationNotModifiable(ReservationNotModifiableException ex) {
+        return ResponseEntity.status(HttpStatus.CONFLICT)
+                .body(new ErrorResponse("reservation_not_modifiable", ex.getMessage()));
     }
 
     @ExceptionHandler(ReservationNotRefundableException.class)

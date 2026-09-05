@@ -4,29 +4,38 @@ import com.corhuila.errorcapa8.travesia_natural.common.audit.AuditRecord;
 import com.corhuila.errorcapa8.travesia_natural.common.audit.AuditRecorder;
 import com.corhuila.errorcapa8.travesia_natural.reservations.domain.exception.InvalidReservationException;
 import com.corhuila.errorcapa8.travesia_natural.reservations.domain.exception.ReservationNotFoundException;
+import com.corhuila.errorcapa8.travesia_natural.reservations.domain.exception.SupportValidationNotAllowedException;
 import com.corhuila.errorcapa8.travesia_natural.reservations.domain.model.Reservation;
 import com.corhuila.errorcapa8.travesia_natural.reservations.domain.port.in.DecidePaymentSupportCommand;
 import com.corhuila.errorcapa8.travesia_natural.reservations.domain.port.in.DecidePaymentSupportUseCase;
 import com.corhuila.errorcapa8.travesia_natural.reservations.domain.port.out.ReservationRepositoryPort;
 import com.corhuila.errorcapa8.travesia_natural.tenants.domain.exception.TenantInactiveException;
 import com.corhuila.errorcapa8.travesia_natural.tenants.domain.exception.TenantNotFoundException;
+import com.corhuila.errorcapa8.travesia_natural.tenants.domain.model.Membership;
+import com.corhuila.errorcapa8.travesia_natural.tenants.domain.model.MembershipRole;
 import com.corhuila.errorcapa8.travesia_natural.tenants.domain.model.Tenant;
 import com.corhuila.errorcapa8.travesia_natural.tenants.domain.model.TenantStatus;
+import com.corhuila.errorcapa8.travesia_natural.tenants.domain.port.out.MembershipRepositoryPort;
 import com.corhuila.errorcapa8.travesia_natural.tenants.domain.port.out.TenantRepositoryPort;
 import org.springframework.stereotype.Service;
+
+import java.util.UUID;
 
 @Service
 public class DecidePaymentSupportService implements DecidePaymentSupportUseCase {
 
     private final TenantRepositoryPort tenantRepositoryPort;
     private final ReservationRepositoryPort reservationRepositoryPort;
+    private final MembershipRepositoryPort membershipRepositoryPort;
     private final AuditRecorder auditRecorder;
 
     public DecidePaymentSupportService(TenantRepositoryPort tenantRepositoryPort,
                                         ReservationRepositoryPort reservationRepositoryPort,
+                                        MembershipRepositoryPort membershipRepositoryPort,
                                         AuditRecorder auditRecorder) {
         this.tenantRepositoryPort = tenantRepositoryPort;
         this.reservationRepositoryPort = reservationRepositoryPort;
+        this.membershipRepositoryPort = membershipRepositoryPort;
         this.auditRecorder = auditRecorder;
     }
 
@@ -36,7 +45,8 @@ public class DecidePaymentSupportService implements DecidePaymentSupportUseCase 
             throw new InvalidReservationException("reason is required to decide a payment support");
         }
 
-        requireActiveTenant(command.tenantId());
+        Tenant tenant = requireActiveTenant(command.tenantId());
+        requireSupportValidationAllowed(tenant, command.actorId());
 
         Reservation reservation = reservationRepositoryPort
                 .findByTenantIdAndReservationId(command.tenantId(), command.reservationId())
@@ -63,12 +73,43 @@ public class DecidePaymentSupportService implements DecidePaymentSupportUseCase 
         return saved;
     }
 
-    private void requireActiveTenant(String tenantId) {
+    private Tenant requireActiveTenant(String tenantId) {
         Tenant tenant = tenantRepositoryPort.findById(tenantId)
                 .orElseThrow(() -> new TenantNotFoundException(tenantId));
 
         if (tenant.tenantStatus() == TenantStatus.INACTIVO) {
             throw new TenantInactiveException(tenant.tenantId());
         }
+
+        return tenant;
+    }
+
+    private void requireSupportValidationAllowed(Tenant tenant, String actorId) {
+        if (actorId == null) {
+            throw new SupportValidationNotAllowedException("actorId must be a valid membershipId: null");
+        }
+
+        UUID actorMembershipId;
+        try {
+            actorMembershipId = UUID.fromString(actorId);
+        } catch (IllegalArgumentException e) {
+            throw new SupportValidationNotAllowedException("actorId must be a valid membershipId: " + actorId);
+        }
+
+        Membership actor = membershipRepositoryPort.findByTenantIdAndMembershipId(tenant.tenantId(), actorMembershipId)
+                .orElseThrow(() -> new SupportValidationNotAllowedException(
+                        "membership not found for actorId: " + actorId + " in tenant " + tenant.tenantId()));
+
+        if (actor.role() == MembershipRole.ADMINISTRATOR) {
+            return;
+        }
+
+        if (actor.role() == MembershipRole.OPERATIONAL_COLLABORATOR && tenant.allowCollaboratorSupportValidation()) {
+            return;
+        }
+
+        throw new SupportValidationNotAllowedException(
+                "actor role " + actor.role() + " is not allowed to decide a payment support for tenant "
+                        + tenant.tenantId());
     }
 }

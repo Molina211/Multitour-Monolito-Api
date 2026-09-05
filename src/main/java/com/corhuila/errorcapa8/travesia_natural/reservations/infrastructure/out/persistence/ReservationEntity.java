@@ -109,6 +109,15 @@ public class ReservationEntity {
     @Column(name = "finalized_at")
     private Instant finalizedAt;
 
+    @Column(name = "modification_reason")
+    private String modificationReason;
+
+    @Column(name = "modified_by")
+    private String modifiedBy;
+
+    @Column(name = "modified_at")
+    private Instant modifiedAt;
+
     @Column(name = "holder_document")
     private String holderDocument;
 
@@ -133,7 +142,8 @@ public class ReservationEntity {
                               String refundAuthorizationNote, String refundRejectedBy, Instant refundRejectedAt,
                               String refundRejectionReason, BigDecimal refundedAmount, String refundReason,
                               String refundedBy, String refundMethod, Instant refundedAt, String finalizedBy,
-                              Instant finalizedAt, String holderDocument) {
+                              Instant finalizedAt, String modificationReason, String modifiedBy, Instant modifiedAt,
+                              String holderDocument) {
         this.reservationId = reservationId;
         this.tenantId = tenantId;
         this.customerId = customerId;
@@ -164,6 +174,9 @@ public class ReservationEntity {
         this.refundedAt = refundedAt;
         this.finalizedBy = finalizedBy;
         this.finalizedAt = finalizedAt;
+        this.modificationReason = modificationReason;
+        this.modifiedBy = modifiedBy;
+        this.modifiedAt = modifiedAt;
         this.holderDocument = holderDocument;
     }
 
@@ -173,15 +186,17 @@ public class ReservationEntity {
      * {@code customerId}/{@code projectedValue}/{@code createdAt}/{@code reservedServices}
      * son fijos desde la creación, no se tocan aquí.
      */
-    public void updateState(BigDecimal finalValue, BigDecimal pendingBalance, BigDecimal creditBalance,
-                             String reservationStatus, String paymentStatus, String paymentMethod,
-                             BigDecimal pendingTransferAmount, String transferSupportReference,
+    public void updateState(BigDecimal projectedValue, BigDecimal finalValue, BigDecimal pendingBalance,
+                             BigDecimal creditBalance, String reservationStatus, String paymentStatus,
+                             String paymentMethod, BigDecimal pendingTransferAmount, String transferSupportReference,
                              String cancellationReason, String cancelledBy, Instant cancelledAt,
                              String refundDecisionStatus, String refundAuthorizedBy, Instant refundAuthorizedAt,
                              String refundAuthorizationNote, String refundRejectedBy, Instant refundRejectedAt,
                              String refundRejectionReason, BigDecimal refundedAmount, String refundReason,
                              String refundedBy, String refundMethod, Instant refundedAt, String finalizedBy,
-                             Instant finalizedAt) {
+                             Instant finalizedAt, String modificationReason, String modifiedBy,
+                             Instant modifiedAt) {
+        this.projectedValue = projectedValue;
         this.finalValue = finalValue;
         this.pendingBalance = pendingBalance;
         this.creditBalance = creditBalance;
@@ -207,6 +222,23 @@ public class ReservationEntity {
         this.refundedAt = refundedAt;
         this.finalizedBy = finalizedBy;
         this.finalizedAt = finalizedAt;
+        this.modificationReason = modificationReason;
+        this.modifiedBy = modifiedBy;
+        this.modifiedAt = modifiedAt;
+    }
+
+    /**
+     * Reemplaza por completo la colección de servicios reservados (spec 022): a
+     * diferencia del resto de campos, {@code reservedServices} no se toca en
+     * {@code updateState} para no disparar {@code orphanRemoval} en cada pago o
+     * cancelación; este método existe solo para la modificación explícita de una
+     * reserva, donde sí corresponde reemplazarla.
+     */
+    public void replaceReservedServices(List<ReservedServiceEntity> newReservedServices) {
+        this.reservedServices.clear();
+        for (ReservedServiceEntity reservedService : newReservedServices) {
+            addReservedService(reservedService);
+        }
     }
 
     public void addReservedService(ReservedServiceEntity reservedService) {
@@ -341,6 +373,18 @@ public class ReservationEntity {
 
     public List<ReservedServiceEntity> getReservedServices() {
         return reservedServices;
+    }
+
+    public String getModificationReason() {
+        return modificationReason;
+    }
+
+    public String getModifiedBy() {
+        return modifiedBy;
+    }
+
+    public Instant getModifiedAt() {
+        return modifiedAt;
     }
 
     public String getHolderDocument() {

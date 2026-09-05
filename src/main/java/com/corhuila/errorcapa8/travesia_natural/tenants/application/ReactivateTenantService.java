@@ -35,7 +35,7 @@ public class ReactivateTenantService implements ReactivateTenantUseCase {
 
         auditRecorder.record(AuditRecord.of(
                 reactivated.tenantId(), command.actorId(), "TENANT_REACTIVATED", reactivated.tenantId(),
-                command.reason()));
+                command.reason(), "Inactivo", "Activo", "tenants", "Cambio de estado de operador"));
 
         return reactivated;
     }
