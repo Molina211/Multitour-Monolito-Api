@@ -140,6 +140,39 @@ public final class Membership {
     }
 
     /**
+     * Creates a Platform Administrator membership. {@code passwordHash} must already be hashed
+     * by the caller (application layer, via PasswordEncoder). Unlike the other roles, this one
+     * has no dedicated registration HU: it only exists via {@code PlatformAdministratorSeeder},
+     * seeded once under the reserved tenant id returned by {@code RESERVED_TENANT_ID} because
+     * every Membership row requires a {@code tenant_id} (FK, INV-TEN-001) even though a Platform
+     * Administrator does not belong to a single tenant. See the seeder's Javadoc for the full
+     * rationale.
+     */
+    public static Membership createPlatformAdministrator(String tenantId, String email, String passwordHash) {
+        if (tenantId == null || tenantId.isBlank()) {
+            throw new InvalidTenantException("tenantId is required");
+        }
+        if (email == null || email.isBlank()) {
+            throw new InvalidTenantException("platform administrator email is required");
+        }
+        if (passwordHash == null || passwordHash.isBlank()) {
+            throw new InvalidTenantException("platform administrator password is required");
+        }
+
+        return new Membership(
+                UUID.randomUUID(),
+                tenantId,
+                null,
+                null,
+                email,
+                null,
+                passwordHash,
+                MembershipRole.PLATFORM_ADMINISTRATOR,
+                MembershipStatus.ACTIVA,
+                Instant.now());
+    }
+
+    /**
      * Rebuilds a Membership already persisted (spec 004, login). Unlike {@code createAdministrator}/
      * {@code createEndCustomer}, this factory does not enforce the creation-time invariants (e.g.
      * firstName required) because a row that already exists in the database was valid when it was
