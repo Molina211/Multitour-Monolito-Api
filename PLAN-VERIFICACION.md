@@ -3283,3 +3283,117 @@ alcanzable desde este endpoint (lo intercepta el JWT con `403 tenant_mismatch`, 
 hallazgo ya registrado en la sección "007") — no es un hallazgo nuevo de esta spec, así
 que se ajustó el texto del paso 6 en vez de dejar la afirmación original sin verificar;
 `tenant_inactive` sí se confirmó con `409` como estaba previsto.
+
+## 026 — Login staff y Platform Administrator
+
+Corresponde a `specs/026-login-staff-y-administrador-plataforma/`. No agrega ningún
+endpoint: reutiliza `POST /api/tenants/{tenantId}/login` (spec 004) para dos casos que
+antes no lo consumían — "Equipo del operador" (Administrador/Colaborador) del Frontend,
+y "Acceso de plataforma" (Platform Administrator) contra el tenant reservado `platform`
+sembrado por `PlatformAdministratorSeeder` al arrancar la aplicación.
+
+### 1. Compilación y tests (con el seeder corriendo en el contexto de test)
+
+```bash
+./mvnw -q test
+```
+
+`contextLoads` (`TravesiaNaturalApplicationTests`) levanta el contexto completo de
+Spring, así que `PlatformAdministratorSeeder` corre también ahí. Confirmado en verde.
+
+### 2. Primer arranque: seed del tenant `platform` y su Platform Administrator
+
+```bash
+./mvnw spring-boot:run
+```
+
+Confirmado por consulta directa a la base:
+
+```sql
+SELECT tenant_id, commercial_name, tenant_status FROM tenants WHERE tenant_id='platform';
+SELECT membership_id, tenant_id, email, role, membership_status FROM memberships WHERE tenant_id='platform';
+```
+
+Resultado: una fila en `tenants` (`platform`, "Multitour (plataforma)", `ACTIVO`) y una
+en `memberships` (`admin@multitour.plataforma`, `PLATFORM_ADMINISTRATOR`, `ACTIVA`).
+
+### 3. Login del Platform Administrator (`200`)
+
+```bash
+curl -i -X POST http://localhost:8080/api/tenants/platform/login \
+  -H "Content-Type: application/json" \
+  -d '{ "email": "admin@multitour.plataforma", "password": "Multitour#2026" }'
+```
+
+Se espera `200 OK` con `role: "PLATFORM_ADMINISTRATOR"` y `tenantId: "platform"`, mismo
+contrato de `LoginResponse` que cualquier otro tenant.
+
+### 4. Password incorrecto en el tenant `platform` (`401` genérico)
+
+```bash
+curl -i -X POST http://localhost:8080/api/tenants/platform/login \
+  -H "Content-Type: application/json" \
+  -d '{ "email": "admin@multitour.plataforma", "password": "incorrecta" }'
+```
+
+Se espera `401` con el mismo cuerpo genérico de spec 004
+(`{"error":"invalid_credentials","message":"email o password incorrectos"}`).
+
+### 5. Reinicio de la aplicación: el seed no duplica nada
+
+```bash
+# detener el proceso y volver a arrancarlo
+./mvnw spring-boot:run
+```
+
+Repetir la consulta del paso 2: sigue existiendo exactamente una fila en `tenants` y una
+en `memberships` para `platform` — `existsById("platform")` corta el seed antes de
+insertar de nuevo.
+
+### 6. Login de Administrador/Colaborador reales (rol correcto en la respuesta)
+
+Requiere un tenant `travesia-natural` con un Administrador (spec 002) y un Colaborador
+(spec 014) ya creados — reutilizar los de la sección "014" si existen, o crear ambos:
+
+```bash
+curl -i -X POST http://localhost:8080/api/tenants \
+  -H "Content-Type: application/json" \
+  -d '{ "tenantId": "travesia-natural", "commercialName": "Travesia Natural",
+        "administrator": { "email": "admin@travesia-natural.com", "password": "Admin123!", "passwordConfirmation": "Admin123!" },
+        "actorId": "verificacion-spec026" }'
+
+curl -i -X POST http://localhost:8080/api/tenants/travesia-natural/collaborators \
+  -H "Content-Type: application/json" \
+  -d '{ "name": "Laura Colaboradora", "email": "colaborador@travesia-natural.com", "password": "Colab123!", "passwordConfirmation": "Colab123!", "actorId": "verificacion-spec026" }'
+
+curl -i -X POST http://localhost:8080/api/tenants/travesia-natural/login \
+  -H "Content-Type: application/json" \
+  -d '{ "email": "admin@travesia-natural.com", "password": "Admin123!" }'
+
+curl -i -X POST http://localhost:8080/api/tenants/travesia-natural/login \
+  -H "Content-Type: application/json" \
+  -d '{ "email": "colaborador@travesia-natural.com", "password": "Colab123!" }'
+```
+
+Se espera `200 OK` en ambos logins, con `role: "ADMINISTRATOR"` y
+`role: "OPERATIONAL_COLLABORATOR"` respectivamente — confirma que `LoginService` no
+filtra por rol (mismo endpoint, mismo contrato, distinto `role` en la respuesta), la
+premisa central de la spec 026 para no tocar Backend en el caso 1a.
+
+Ejecutado el 2026-09-06 contra la base de desarrollo local (Postgres
+`multitour-postgres`, puerto interno 8090 para no chocar con el contenedor
+`multitour-backend` ya corriendo en 8081 — mismo comportamiento documentado aquí con el
+puerto estándar 8080). `./mvnw test` en verde. El tenant `travesia-natural` no existía
+todavía en esta base (solo specs previas que se limpiaron o nunca se persistieron ahí);
+se creó como parte de esta verificación, junto con el Administrador y el Colaborador de
+prueba. Los 6 pasos devolvieron los códigos HTTP y payloads exactos documentados arriba,
+incluyendo la confirmación de idempotencia del seed tras un segundo arranque real (no
+solo en el contexto de test).
+
+**Nota posterior (2026-09-06):** los pasos 1-6 de esta sección corren contra el Backend
+por `curl` y siguen siendo válidos tal cual. El código de Frontend que los consumía
+(`login.component.ts`, `admin-login.component.ts`) se implementó y verificó el mismo
+día, pero fue revertido después por decisión del responsable humano — el Frontend es
+autoría de una compañera de equipo. Ver `specs/026.../spec.md` y
+`PROPUESTA-INTEGRACION-LOGIN-Y-RESERVA-FRONTEND.md` (raíz del workspace).
+
