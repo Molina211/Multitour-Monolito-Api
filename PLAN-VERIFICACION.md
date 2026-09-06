@@ -3397,3 +3397,93 @@ día, pero fue revertido después por decisión del responsable humano — el Fr
 autoría de una compañera de equipo. Ver `specs/026.../spec.md` y
 `PROPUESTA-INTEGRACION-LOGIN-Y-RESERVA-FRONTEND.md` (raíz del workspace).
 
+## 027 — Flujo de autoservicio: registro → login → reservar
+
+Corresponde a `specs/027-flujo-autoservicio-reserva-cliente/`. Encadena tres endpoints
+ya existentes y verificados por separado (specs 003, 004, 001/017/018) para confirmar
+que sostienen, de punta a punta, el primer flujo de escritura real consumido desde el
+Frontend. Requiere Postgres arriba, la app corriendo, y el tenant `travesia-natural`
+`Activo` (sección "026", paso 6, o ya existente).
+
+### 1. Registro de un cliente nuevo (`201`)
+
+```bash
+curl -i -X POST http://localhost:8080/api/tenants/travesia-natural/customers \
+  -H "Content-Type: application/json" \
+  -d '{ "firstName": "Laura", "lastName": "Gomez", "email": "laura.gomez.spec027@example.com",
+        "phone": "3001234567", "password": "Cliente123!", "passwordConfirmation": "Cliente123!" }'
+```
+
+Se espera `201 Created` con `role: "END_CUSTOMER"`, `membershipStatus: "ACTIVA"`, sin
+`passwordHash` en la respuesta.
+
+### 2. Login del cliente recién registrado (`200`)
+
+```bash
+curl -s -X POST http://localhost:8080/api/tenants/travesia-natural/login \
+  -H "Content-Type: application/json" \
+  -d '{ "email": "laura.gomez.spec027@example.com", "password": "Cliente123!" }'
+```
+
+Guardar `accessToken` como `TOKEN`.
+
+### 3. Crear una reserva real con ese token (`201`)
+
+```bash
+curl -i -X POST http://localhost:8080/api/tenants/travesia-natural/reservations \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer ${TOKEN}" \
+  -d '{ "projectedValue": 350000,
+        "reservedServices": [{ "serviceReference": "tour-laguna-verde", "partySize": 2, "scheduledDate": "2026-12-20", "transportItemId": null }],
+        "holderDocument": "1234567890",
+        "companions": [{ "name": "Carlos Gomez", "document": "0987654321", "birthDate": "1995-05-10" }] }'
+```
+
+Se espera `201 Created` con `customerId` igual al `membershipId` del paso 1,
+`reservationStatus: "Pendiente de pago"`, `paymentStatus: "Sin pago"`,
+`pendingBalance: 350000`. Confirma que `serviceReference` acepta el `key` del catálogo
+mock del Frontend (`"tour-laguna-verde"`) como texto libre, sin exigir que exista un
+`CatalogItem` real con esa referencia — la premisa de diseño de spec 027 para no migrar
+el formulario de reserva al catálogo real en este corte.
+
+### 4. La reserva es visible desde el dashboard del operador (`GET`, sin auth)
+
+```bash
+curl -s http://localhost:8080/api/tenants/travesia-natural/reservations
+```
+
+Se espera ver la reserva del paso 3 en el listado (spec 006).
+
+### 5. Crear una reserva sin token (`401`)
+
+```bash
+curl -i -X POST http://localhost:8080/api/tenants/travesia-natural/reservations \
+  -H "Content-Type: application/json" \
+  -d '{ "projectedValue": 100000, "reservedServices": [{ "serviceReference": "tour-x", "partySize": 1, "scheduledDate": "2026-12-20", "transportItemId": null }], "holderDocument": "111", "companions": [] }'
+```
+
+Se espera `401 Unauthorized` con `{"error":"unauthorized","message":"missing or invalid token"}`
+(spec 007), sin crear ninguna reserva.
+
+### 6. Compilación y tests
+
+```bash
+./mvnw test
+```
+
+Debe mantenerse en verde, sin cambios de contrato respecto a specs 001-026.
+
+Ejecutado el 2026-09-06 contra la misma base de desarrollo local de la sección "026"
+(puerto interno 8090). Los 5 pasos de flujo devolvieron los códigos HTTP y payloads
+exactos documentados arriba: registro `201`, login `200` con `role: "END_CUSTOMER"`,
+reserva `201` con `pendingBalance: 350000`, reserva visible en el listado del operador,
+y rechazo `401` sin token. `./mvnw test` en verde antes y después de esta verificación.
+
+**Nota posterior (2026-09-06):** los pasos 1-5 corren 100% contra el Backend por `curl`,
+sin ningún Frontend de por medio, y siguen siendo válidos tal cual — esta spec nunca
+tocó el Backend. El código de Frontend que habría encadenado este flujo desde una
+pantalla real (`signup.component.ts`, `client-tour-booking.component.ts`) se implementó
+y verificó el mismo día, pero fue revertido después por decisión del responsable
+humano — el Frontend es autoría de una compañera de equipo. Ver
+`specs/027.../spec.md` y `PROPUESTA-INTEGRACION-LOGIN-Y-RESERVA-FRONTEND.md` (raíz del
+workspace).
