@@ -1,0 +1,3489 @@
+# Plan de verificación — 001 Walking Skeleton + Reservation
+
+Corresponde a `specs/001-walking-skeleton-reservation/`. Se completa por lotes a medida
+que avanza la implementación (ver `tasks.md`).
+
+## 1. Levantar Postgres local
+
+```bash
+docker compose up -d
+docker compose ps
+```
+
+Se espera el contenedor `multitour-postgres` en estado `healthy`.
+
+## 2. Verificar que Flyway aplicó el esquema
+
+```bash
+docker exec -it multitour-postgres psql -U multitour -d multitour -c "\dt"
+docker exec -it multitour-postgres psql -U multitour -d multitour -c "\d reservations"
+```
+
+Se esperan las tablas `reservations`, `reserved_services` y `flyway_schema_history`, con
+`tenant_id` como `NOT NULL` en ambas tablas de negocio.
+
+## 4. Arrancar la aplicación
+
+```bash
+./mvnw spring-boot:run
+```
+
+## 5. Verificar `/health`
+
+```bash
+curl -i http://localhost:8080/health
+```
+
+Se espera `200 OK` y `{"status":"UP"}`.
+
+## 6. Crear una reserva
+
+**Nota (spec 006):** `tenantId` ya no se resuelve vía header `X-Tenant-Id`, sino en la
+URL (`/api/tenants/{tenantId}/reservations`), mismo patrón que `tenants`/`catalog`. Los
+pasos 6-8 de esta sección se actualizaron para reflejar el contrato vigente — ver
+sección "006" más abajo para el detalle completo de la migración.
+
+```bash
+curl -i -X POST http://localhost:8080/api/tenants/travesia-natural/reservations \
+  -H "Content-Type: application/json" \
+  -d '{
+        "customerId": "cliente-001",
+        "projectedValue": 250000,
+        "reservedServices": [
+          { "serviceReference": "tour-laguna-verde", "partySize": 2, "scheduledDate": "2026-10-01" }
+        ]
+      }'
+```
+
+Se espera `201 Created` con `reservationStatus: "Pendiente de pago"` y `paymentStatus:
+"Sin pago"`. Confirmar la fila con:
+
+```bash
+docker exec -it multitour-postgres psql -U multitour -d multitour -c "SELECT reservation_id, tenant_id, customer_id, reservation_status FROM reservations;"
+```
+
+## 7. Rechazo por datos incompletos
+
+Repetir el `curl` anterior, cada vez quitando un dato distinto, y confirmar
+`400 Bad Request` sin que quede fila nueva en `reservations`:
+
+- Sin `customerId` en el body.
+- Con `reservedServices: []` (lista vacía).
+
+## 8. Aislamiento entre tenants
+
+Repetir el `curl` del paso 6 dos veces con el mismo `customerId` pero un `{tenantId}`
+distinto en la URL en cada llamada (por ejemplo `travesia-natural` y otro tenant creado
+en la sección "002"). Confirmar con la consulta `psql` del paso 6 que quedan dos filas
+con `tenant_id` distinto y sin ninguna relación cruzada entre ellas.
+
+## 9. Compilación y test por defecto
+
+```bash
+./mvnw test
+```
+
+---
+
+# Plan de verificación — 002 Tenant lifecycle
+
+Corresponde a `specs/002-tenant-lifecycle/`. Requiere la app corriendo (paso 4 de la
+sección anterior) y Postgres arriba (paso 1). Verifica cada criterio de aceptación de
+`spec.md`.
+
+## 1. Verificar el esquema V2
+
+```bash
+docker exec -it multitour-postgres psql -U multitour -d multitour -c "\dt"
+docker exec -it multitour-postgres psql -U multitour -d multitour -c "\d tenants"
+docker exec -it multitour-postgres psql -U multitour -d multitour -c "\d memberships"
+docker exec -it multitour-postgres psql -U multitour -d multitour -c "\d audit_records"
+```
+
+Se esperan las tablas `tenants`, `memberships` y `audit_records` además de las de
+spec 001, con `flyway_schema_history` mostrando `V1` y `V2` aplicadas.
+
+## 2. Crear un tenant con su primer Administrador
+
+```bash
+curl -i -X POST http://localhost:8080/api/tenants \
+  -H "Content-Type: application/json" \
+  -d '{
+        "tenantId": "travesia-natural",
+        "commercialName": "Travesia Natural",
+        "actorId": "platform-admin@multitour.dev",
+        "administrator": {
+          "name": "Admin Travesia",
+          "email": "admin@travesia-natural.dev",
+          "password": "Sup3rSecreta!",
+          "passwordConfirmation": "Sup3rSecreta!"
+        }
+      }'
+```
+
+Se espera `201 Created` con `tenantStatus: "ACTIVO"`. Confirmar que la membresía quedó
+con la contraseña hasheada (no en texto plano):
+
+```bash
+docker exec -it multitour-postgres psql -U multitour -d multitour -c "SELECT tenant_id, tenant_status FROM tenants;"
+docker exec -it multitour-postgres psql -U multitour -d multitour -c "SELECT tenant_id, email, role, membership_status, password_hash FROM memberships;"
+```
+
+`password_hash` debe empezar con `$2a$` o `$2b$` (prefijo BCrypt), nunca
+`Sup3rSecreta!` literal.
+
+## 3. Rechazo por `tenantId` duplicado
+
+Repetir el `curl` del paso 2 exactamente igual. Se espera `409 Conflict` y que la
+consulta `SELECT count(*) FROM tenants WHERE tenant_id = 'travesia-natural';` siga
+devolviendo `1`.
+
+## 4. Rechazo por contraseñas que no coinciden
+
+```bash
+curl -i -X POST http://localhost:8080/api/tenants \
+  -H "Content-Type: application/json" \
+  -d '{
+        "tenantId": "otro-tenant",
+        "commercialName": "Otro Tenant",
+        "actorId": "platform-admin@multitour.dev",
+        "administrator": {
+          "name": "Admin Otro",
+          "email": "admin@otro-tenant.dev",
+          "password": "Uno123!",
+          "passwordConfirmation": "Distinta456!"
+        }
+      }'
+```
+
+Se espera `400 Bad Request` y que `otro-tenant` no quede creado (`SELECT * FROM
+tenants WHERE tenant_id = 'otro-tenant';` sin filas).
+
+## 5. Desactivar un tenant
+
+Sin `reason`:
+
+```bash
+curl -i -X POST http://localhost:8080/api/tenants/travesia-natural/deactivate \
+  -H "Content-Type: application/json" \
+  -d '{ "actorId": "platform-admin@multitour.dev" }'
+```
+
+Se espera `400 Bad Request`. Con `reason`:
+
+```bash
+curl -i -X POST http://localhost:8080/api/tenants/travesia-natural/deactivate \
+  -H "Content-Type: application/json" \
+  -d '{ "reason": "Incumplimiento de pago", "actorId": "platform-admin@multitour.dev" }'
+```
+
+Se espera `200 OK` con `tenantStatus: "INACTIVO"`.
+
+## 6. Reactivar el tenant
+
+```bash
+curl -i -X POST http://localhost:8080/api/tenants/travesia-natural/reactivate \
+  -H "Content-Type: application/json" \
+  -d '{ "reason": "Pago regularizado", "actorId": "platform-admin@multitour.dev" }'
+```
+
+Se espera `200 OK` con `tenantStatus: "ACTIVO"`.
+
+## 7. El historial no se borra al desactivar (`INV-TEN-002`)
+
+```bash
+curl -i http://localhost:8080/api/tenants/travesia-natural
+```
+
+Debe devolver `200 OK` con los datos del tenant sin importar su estado actual (probar
+también inmediatamente después del paso 5, antes de reactivar).
+
+## 8. Auditoría de las tres acciones de ciclo de vida
+
+```bash
+curl -i http://localhost:8080/api/audit
+```
+
+Se esperan al menos tres registros para `travesia-natural`: `TENANT_CREATED`,
+`TENANT_DEACTIVATED`, `TENANT_REACTIVATED`, cada uno con `actorId`, `tenantId`,
+`action`, `reason` (nulo solo en `TENANT_CREATED`) y `recordedAt`. Confirmar también
+por base de datos:
+
+```bash
+docker exec -it multitour-postgres psql -U multitour -d multitour -c "SELECT tenant_id, actor_id, action, reason, recorded_at FROM audit_records ORDER BY recorded_at;"
+```
+
+## 9. Listado de tenants
+
+```bash
+curl -i http://localhost:8080/api/tenants
+```
+
+Se espera `200 OK` con un array que incluye `travesia-natural`.
+
+## 10. Compilación y tests (spec 001 + spec 002)
+
+```bash
+./mvnw test
+```
+
+Deben seguir en verde `contextLoads` y los tests de spec 001, sin regresiones.
+
+---
+
+# Plan de verificación — 003 End customer registration
+
+Corresponde a `specs/003-end-customer-registration/`. Requiere la app corriendo (paso 4
+de la primera sección) y Postgres arriba (paso 1). Reutiliza el tenant
+`travesia-natural` creado en la sección "002 — Tenant lifecycle" (si no existe,
+repetir el paso 2 de esa sección primero).
+
+## 1. Verificar el esquema V3
+
+```bash
+docker exec -it multitour-postgres psql -U multitour -d multitour -c "\d memberships"
+```
+
+Se esperan las columnas nuevas `first_name`, `last_name`, `phone` y el índice único
+`uq_memberships_tenant_email`, además de `flyway_schema_history` mostrando `V3`
+aplicada.
+
+## 2. Registrar un End Customer
+
+```bash
+curl -i -X POST http://localhost:8080/api/tenants/travesia-natural/customers \
+  -H "Content-Type: application/json" \
+  -d '{
+        "firstName": "Laura",
+        "lastName": "Gomez",
+        "email": "laura.gomez@example.com",
+        "phone": "3001234567",
+        "password": "Cliente123!",
+        "passwordConfirmation": "Cliente123!"
+      }'
+```
+
+Se espera `201 Created` con `role: "END_CUSTOMER"` y `membershipStatus: "ACTIVA"`.
+Confirmar que la contraseña quedó hasheada:
+
+```bash
+docker exec -it multitour-postgres psql -U multitour -d multitour -c "SELECT tenant_id, email, first_name, last_name, phone, role, password_hash FROM memberships WHERE email = 'laura.gomez@example.com';"
+```
+
+`password_hash` debe empezar con `$2a$` o `$2b$`, nunca `Cliente123!` literal.
+
+## 3. Rechazo por email duplicado en el mismo tenant
+
+Repetir el `curl` del paso 2 exactamente igual. Se espera `409 Conflict` y que
+`SELECT count(*) FROM memberships WHERE tenant_id = 'travesia-natural' AND email =
+'laura.gomez@example.com';` siga devolviendo `1`.
+
+## 4. El mismo email en otro tenant sí se permite
+
+Crear un segundo tenant (por ejemplo `otro-tenant`, con el paso 2 de la sección "002 —
+Tenant lifecycle") y repetir el `curl` del paso 2 de esta sección apuntando a
+`/api/tenants/otro-tenant/customers` con el mismo email. Se espera `201 Created`, y la
+consulta `psql` debe mostrar dos filas con el mismo email y `tenant_id` distinto, sin
+relación cruzada entre ellas.
+
+## 5. Rechazo por contraseñas que no coinciden
+
+```bash
+curl -i -X POST http://localhost:8080/api/tenants/travesia-natural/customers \
+  -H "Content-Type: application/json" \
+  -d '{
+        "firstName": "Carlos",
+        "lastName": "Ruiz",
+        "email": "carlos.ruiz@example.com",
+        "password": "Uno123!",
+        "passwordConfirmation": "Distinta456!"
+      }'
+```
+
+Se espera `400 Bad Request` y que `carlos.ruiz@example.com` no quede creado.
+
+## 6. Rechazo por política de contraseña incumplida
+
+Repetir el `curl` del paso 2 con un email nuevo y `"password": "corta1", "passwordConfirmation": "corta1"`
+(sin mayúscula ni carácter especial). Se espera `400 Bad Request` sin persistir nada.
+
+## 7. Rechazo por tenant inexistente
+
+```bash
+curl -i -X POST http://localhost:8080/api/tenants/no-existe/customers \
+  -H "Content-Type: application/json" \
+  -d '{
+        "firstName": "Ana",
+        "lastName": "Diaz",
+        "email": "ana.diaz@example.com",
+        "password": "Cliente123!",
+        "passwordConfirmation": "Cliente123!"
+      }'
+```
+
+Se espera `404 Not Found`.
+
+## 8. Rechazo por tenant `Inactivo`
+
+Desactivar `travesia-natural` (paso 5 de la sección "002 — Tenant lifecycle") y
+repetir el `curl` del paso 2 de esta sección con un email nuevo. Se espera `409
+Conflict` sin persistir nada. Reactivar el tenant al terminar (paso 6 de esa sección)
+para no dejar el ambiente en un estado inconsistente para pruebas futuras.
+
+## 9. Compilación y tests (spec 001 + spec 002 + spec 003)
+
+```bash
+./mvnw test
+```
+
+Deben seguir en verde `contextLoads` y los tests existentes, sin regresiones.
+
+---
+
+# Plan de verificación — 004 End customer login
+
+Corresponde a `specs/004-end-customer-login/`. Requiere la app corriendo (paso 4 de la
+primera sección) y Postgres arriba (paso 1). Reutiliza el tenant `travesia-natural` y el
+cliente `laura.gomez@example.com` creados en la sección "003 — End customer
+registration" (si no existen, repetir esos pasos primero).
+
+Nota: este endpoint **no** se puede invocar hoy desde `login.component.ts` del Frontend
+(no tiene campo de tenant) — ver el comentario extenso en `AuthController.java`. Toda
+esta verificación es directa contra el Backend.
+
+## 1. Login exitoso
+
+```bash
+curl -i -X POST http://localhost:8080/api/tenants/travesia-natural/login \
+  -H "Content-Type: application/json" \
+  -d '{ "email": "laura.gomez@example.com", "password": "Cliente123!" }'
+```
+
+Se espera `200 OK` con `accessToken` (JWT), `tenantId: "travesia-natural"`,
+`role: "END_CUSTOMER"`, y sin `passwordHash` en ningún lado de la respuesta. Decodificar
+el JWT (por ejemplo en https://jwt.io o `echo "<payload-base64>" | base64 -d`, usando
+solo la parte del medio del token) y confirmar que trae `sub`, `tenantId`, `email`,
+`role`, `iat` y `exp`.
+
+## 2. Rechazo por password incorrecto
+
+```bash
+curl -i -X POST http://localhost:8080/api/tenants/travesia-natural/login \
+  -H "Content-Type: application/json" \
+  -d '{ "email": "laura.gomez@example.com", "password": "Incorrecta1!" }'
+```
+
+Se espera `401 Unauthorized` con `{"error":"invalid_credentials", ...}`.
+
+## 3. Rechazo por email sin membership en ese tenant (incluye email de otro tenant)
+
+```bash
+curl -i -X POST http://localhost:8080/api/tenants/travesia-natural/login \
+  -H "Content-Type: application/json" \
+  -d '{ "email": "no-existe@example.com", "password": "Cliente123!" }'
+```
+
+Se espera `401 Unauthorized`, mismo cuerpo genérico que el paso 2 (sin diferencia
+observable entre "no existe" y "password incorrecto").
+
+## 4. Rechazo por `tenantId` inexistente (no debe ser 404)
+
+```bash
+curl -i -X POST http://localhost:8080/api/tenants/no-existe/login \
+  -H "Content-Type: application/json" \
+  -d '{ "email": "laura.gomez@example.com", "password": "Cliente123!" }'
+```
+
+Se espera `401 Unauthorized`, el mismo cuerpo genérico — nunca `404` (evita enumerar
+tenants válidos, ver criterios de aceptación de `spec.md`).
+
+## 5. Rechazo por tenant `Inactivo`
+
+Desactivar `travesia-natural` (paso 5 de la sección "002 — Tenant lifecycle") y repetir
+el `curl` del paso 1 de esta sección. Se espera `401 Unauthorized` con el mismo cuerpo
+genérico. Reactivar el tenant al terminar (paso 6 de esa sección).
+
+## 6. Rechazo por membership `INACTIVA`
+
+No hay todavía un endpoint para desactivar una membership individual (fuera de alcance
+de spec 002/003/004) — este paso queda pendiente de una spec futura que agregue esa
+capacidad; de momento se puede simular manualmente por base de datos, solo en el
+ambiente local de verificación:
+
+```bash
+docker exec -it multitour-postgres psql -U multitour -d multitour -c "UPDATE memberships SET membership_status = 'INACTIVA' WHERE email = 'laura.gomez@example.com';"
+```
+
+Repetir el `curl` del paso 1: se espera `401 Unauthorized` con el mismo cuerpo genérico.
+Revertir el cambio para no dejar el ambiente inconsistente:
+
+```bash
+docker exec -it multitour-postgres psql -U multitour -d multitour -c "UPDATE memberships SET membership_status = 'ACTIVA' WHERE email = 'laura.gomez@example.com';"
+```
+
+## 7. Compilación y tests (spec 001 + spec 002 + spec 003 + spec 004)
+
+```bash
+./mvnw test
+```
+
+Deben seguir en verde `contextLoads` y los tests existentes, sin regresiones.
+
+---
+
+# Plan de verificación — 005 Catálogo operativo
+
+Corresponde a `specs/005-catalog-item-management/`. Requiere la app corriendo (paso 4
+de la primera sección) y Postgres arriba (paso 1). Reutiliza el tenant
+`travesia-natural` creado en la sección "002 — Tenant lifecycle" (debe estar `Activo`
+al iniciar; si quedó `Inactivo` de una verificación anterior, reactivarlo primero).
+
+Nota: este bloque **no** se puede invocar hoy desde `operator/catalog` ni desde
+`manage-catalog`/`manage-lodging`/`manage-food` del Frontend (siguen simulando todo en
+`localStorage` vía `OperatorCatalogService`). Toda esta verificación es directa contra
+el Backend.
+
+## 1. Crear un ítem válido de cada tipo (`201`)
+
+```bash
+curl -i -X POST http://localhost:8080/api/tenants/travesia-natural/catalog-items \
+  -H "Content-Type: application/json" \
+  -d '{ "type": "TOUR", "name": "Caminata Cocora", "price": 120000 }'
+
+curl -i -X POST http://localhost:8080/api/tenants/travesia-natural/catalog-items \
+  -H "Content-Type: application/json" \
+  -d '{ "type": "LODGING", "name": "Cabaña El Roble", "price": 250000, "capacity": 4 }'
+
+curl -i -X POST http://localhost:8080/api/tenants/travesia-natural/catalog-items \
+  -H "Content-Type: application/json" \
+  -d '{ "type": "FOOD", "name": "Menú campesino", "price": 35000 }'
+```
+
+Se espera `201 Created` en los tres, cada uno con `active: true`. Guardar el
+`catalogItemId` del `LODGING` (se reutiliza en los pasos 4-7).
+
+## 2. Rechazo de `LODGING` sin capacidad válida (`400`)
+
+```bash
+curl -i -X POST http://localhost:8080/api/tenants/travesia-natural/catalog-items \
+  -H "Content-Type: application/json" \
+  -d '{ "type": "LODGING", "name": "Sin capacidad", "price": 100000 }'
+
+curl -i -X POST http://localhost:8080/api/tenants/travesia-natural/catalog-items \
+  -H "Content-Type: application/json" \
+  -d '{ "type": "LODGING", "name": "Capacidad cero", "price": 100000, "capacity": 0 }'
+```
+
+Se espera `400 Bad Request` en ambos, `{"error":"validation_error", ...}`, y ninguna
+fila nueva persistida (verificar con el paso 3 que la lista no creció).
+
+## 3. Listado del tenant (`200`)
+
+```bash
+curl -i http://localhost:8080/api/tenants/travesia-natural/catalog-items
+```
+
+Se espera `200 OK` con los 3 ítems creados en el paso 1 (y ninguno de los rechazados
+en el paso 2).
+
+## 4. Aislamiento entre tenants (`404`)
+
+Usando el `catalogItemId` del `LODGING` del paso 1, consultarlo bajo un tenant distinto
+(por ejemplo, el tenant `otro-operador` creado en la sección "002" si existe; si no,
+crear uno temporal con `POST /api/tenants`):
+
+```bash
+curl -i http://localhost:8080/api/tenants/otro-operador/catalog-items/<catalogItemId-del-LODGING>
+```
+
+Se espera `404 Not Found` — nunca revela el ítem de otro tenant.
+
+## 5. Actualización parcial (`200`)
+
+```bash
+curl -i -X PATCH http://localhost:8080/api/tenants/travesia-natural/catalog-items/<catalogItemId-del-LODGING> \
+  -H "Content-Type: application/json" \
+  -d '{ "price": 270000 }'
+```
+
+Se espera `200 OK` con `price: 270000` y el resto de los campos (`name`, `capacity`,
+etc.) sin cambios.
+
+## 6. Desactivar sin borrar (`200`, trazabilidad histórica)
+
+```bash
+curl -i -X POST http://localhost:8080/api/tenants/travesia-natural/catalog-items/<catalogItemId-del-LODGING>/deactivate
+
+curl -i http://localhost:8080/api/tenants/travesia-natural/catalog-items/<catalogItemId-del-LODGING>
+```
+
+El primer `curl` espera `200 OK` con `active: false`; el segundo (`GET` directo)
+confirma que la fila sigue existiendo y siendo consultable, solo con `active: false`.
+
+## 7. Reactivar (`200`)
+
+```bash
+curl -i -X POST http://localhost:8080/api/tenants/travesia-natural/catalog-items/<catalogItemId-del-LODGING>/reactivate
+```
+
+Se espera `200 OK` con `active: true`.
+
+## 8. Tenant inexistente (`404`) y tenant `Inactivo` (`409`)
+
+```bash
+curl -i http://localhost:8080/api/tenants/no-existe/catalog-items
+```
+
+Se espera `404 Not Found`. Luego, desactivar `travesia-natural` (paso 5 de la sección
+"002 — Tenant lifecycle") y repetir la creación del paso 1:
+
+```bash
+curl -i -X POST http://localhost:8080/api/tenants/travesia-natural/catalog-items \
+  -H "Content-Type: application/json" \
+  -d '{ "type": "TOUR", "name": "No debería crearse", "price": 50000 }'
+```
+
+Se espera `409 Conflict` con `{"error":"tenant_inactive", ...}`. Reactivar el tenant al
+terminar (paso 6 de esa sección) para no dejar el ambiente inconsistente.
+
+## 9. Compilación y tests (spec 001 + spec 002 + spec 003 + spec 004 + spec 005)
+
+```bash
+./mvnw test
+```
+
+Deben seguir en verde `contextLoads` y los tests existentes, sin regresiones.
+
+---
+
+# Plan de verificación — 006 Consulta de reservas + alineación de `tenantId`
+
+Corresponde a `specs/006-reservation-query/`. Requiere haber corrido el paso 1
+("Levantar Postgres local") y tener al menos un tenant `Activo` de la sección "002"
+(`travesia-natural`).
+
+**Nota importante:** `V5__alter_reservations_tenant_id.sql` recrea las tablas
+`reservations`/`reserved_services` desde cero (ver `plan.md`, "Decisiones técnicas",
+riesgo 1). Cualquier reserva creada antes de esta migración (por ejemplo, en la sección
+"001") se pierde al aplicar `V5`. Es un costo aceptado de datos de prueba, no de
+producción.
+
+**Nota (spec 007):** desde spec 007, `POST .../reservations` exige un header
+`Authorization: Bearer <token>` y ya no acepta `customerId` en el body. Los `curl` de
+los pasos 2 y 4 de esta sección quedaron desactualizados por eso — ver la sección "007"
+más abajo para la versión vigente con autenticación. Los pasos 1, 3, 5, 6, 7 y 8 de esta
+sección no cambian.
+
+## 1. Arrancar la aplicación y confirmar la migración V5
+
+```bash
+./mvnw spring-boot:run
+```
+
+En el log de arranque debe verse `Successfully applied 1 migration` hacia
+`5 - alter reservations tenant id` (o `Schema "public" up to date` si ya se había
+aplicado antes).
+
+## 2. Crear una reserva con `tenantId` en la URL (`201`)
+
+```bash
+curl -i -X POST http://localhost:8080/api/tenants/travesia-natural/reservations \
+  -H "Content-Type: application/json" \
+  -d '{
+        "customerId": "cliente-006",
+        "projectedValue": 300000,
+        "reservedServices": [
+          { "serviceReference": "tour-laguna-verde", "partySize": 2, "scheduledDate": "2026-10-15" }
+        ]
+      }'
+```
+
+Se espera `201 Created`, con `tenantId: "travesia-natural"` (string, no UUID) y
+`reservedServices` en la respuesta. Guardar el `reservationId` devuelto para los pasos
+siguientes.
+
+## 3. El header `X-Tenant-Id` y la ruta vieja ya no existen
+
+```bash
+curl -i -X POST http://localhost:8080/api/reservations \
+  -H "Content-Type: application/json" \
+  -H "X-Tenant-Id: 11111111-1111-1111-1111-111111111111" \
+  -d '{ "customerId": "cliente-x", "projectedValue": 1000, "reservedServices": [] }'
+```
+
+Se espera `404 Not Found` (ninguna ruta mapeada en `/api/reservations`), confirmando que
+el contrato viejo fue reemplazado, no duplicado.
+
+## 4. Tenant inexistente (`404`) y tenant `Inactivo` (`409`) al crear
+
+```bash
+curl -i -X POST http://localhost:8080/api/tenants/no-existe/reservations \
+  -H "Content-Type: application/json" \
+  -d '{ "customerId": "cliente-006", "projectedValue": 1000, "reservedServices": [{ "serviceReference": "x" }] }'
+```
+
+Se espera `404 Not Found`. Luego, desactivar `travesia-natural` (paso 5 de la sección
+"002") y repetir el `curl` del paso 2: se espera `409 Conflict` con
+`{"error":"tenant_inactive", ...}`. Reactivar el tenant al terminar (paso 6 de esa
+sección).
+
+## 5. Listar reservas del tenant
+
+```bash
+curl -i http://localhost:8080/api/tenants/travesia-natural/reservations
+```
+
+Se espera `200 OK` con un arreglo que incluye la reserva creada en el paso 2.
+
+## 6. Detalle de una reserva
+
+```bash
+curl -i http://localhost:8080/api/tenants/travesia-natural/reservations/<reservationId-del-paso-2>
+```
+
+Se espera `200 OK` con los mismos campos del listado, incluidos `reservedServices` con
+`serviceReference`, `partySize` y `scheduledDate`.
+
+## 7. Aislamiento entre tenants (`404`, no 200 con datos ajenos)
+
+Crear una segunda reserva bajo otro tenant `Activo` (por ejemplo, uno creado en la
+sección "002"), y luego pedir su `reservationId` bajo `travesia-natural`:
+
+```bash
+curl -i http://localhost:8080/api/tenants/travesia-natural/reservations/<reservationId-del-otro-tenant>
+```
+
+Se espera `404 Not Found` (no filtra existencia cruzada).
+
+## 8. Compilación y tests (spec 001 + spec 002 + spec 003 + spec 004 + spec 005 + spec 006)
+
+```bash
+./mvnw test
+```
+
+Deben seguir en verde `contextLoads` y los tests existentes, sin regresiones.
+
+---
+
+# Plan de verificación — 007 Enforcement de JWT en creación de reservas
+
+Corresponde a `specs/007-jwt-enforcement/`. Requiere Postgres arriba (paso 1), la app
+corriendo (paso 4 de la primera sección), el tenant `travesia-natural` `Activo`, y el
+cliente `laura.gomez@example.com` / `Cliente123!` (creado en la sección "003").
+
+**Nota:** `login.component.ts` del Frontend no guarda el JWT ni lo reenvía en llamadas
+posteriores (mismo hueco documentado en spec 004 y en el comentario extenso de
+`ReservationController.java`) — esta verificación obtiene el token a mano con `curl` y
+lo reenvía manualmente, no hay integración real con el Frontend todavía.
+
+## 1. Obtener un token válido
+
+```bash
+curl -s -X POST http://localhost:8080/api/tenants/travesia-natural/login \
+  -H "Content-Type: application/json" \
+  -d '{ "email": "laura.gomez@example.com", "password": "Cliente123!" }'
+```
+
+Guardar el `accessToken` de la respuesta en una variable para los pasos siguientes:
+
+```bash
+TOKEN="<accessToken del paso anterior>"
+```
+
+## 2. Crear una reserva sin header `Authorization` (`401`)
+
+```bash
+curl -i -X POST http://localhost:8080/api/tenants/travesia-natural/reservations \
+  -H "Content-Type: application/json" \
+  -d '{ "projectedValue": 300000, "reservedServices": [{ "serviceReference": "tour-laguna-verde" }] }'
+```
+
+Se espera `401 Unauthorized` con `{"error":"unauthorized", ...}`.
+
+## 3. Crear una reserva con un token con firma alterada (`401`)
+
+```bash
+curl -i -X POST http://localhost:8080/api/tenants/travesia-natural/reservations \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer ${TOKEN}x" \
+  -d '{ "projectedValue": 300000, "reservedServices": [{ "serviceReference": "tour-laguna-verde" }] }'
+```
+
+Se espera `401 Unauthorized` (firma inválida al alterar un carácter del token).
+
+## 4. Crear una reserva con un token válido de otro tenant (`403`)
+
+Requiere un segundo tenant `Activo` con su propio Administrator/Membership (por ejemplo,
+uno creado en la sección "002"), y un login exitoso contra ese otro tenant para obtener
+un segundo token. Con ese segundo token, llamar a la URL de `travesia-natural`:
+
+```bash
+curl -i -X POST http://localhost:8080/api/tenants/travesia-natural/reservations \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer <token-del-otro-tenant>" \
+  -d '{ "projectedValue": 300000, "reservedServices": [{ "serviceReference": "tour-laguna-verde" }] }'
+```
+
+Se espera `403 Forbidden` con `{"error":"tenant_mismatch", ...}`. Nota: por el mismo
+motivo, este endpoint ya no puede usarse para comprobar el `404` de "tenant inexistente"
+de spec 006 — ver `plan.md`, "Decisiones técnicas".
+
+## 5. Crear una reserva con un token válido del mismo tenant (`201`, `customerId` del token)
+
+```bash
+curl -i -X POST http://localhost:8080/api/tenants/travesia-natural/reservations \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer ${TOKEN}" \
+  -d '{ "projectedValue": 300000, "reservedServices": [{ "serviceReference": "tour-laguna-verde", "partySize": 2, "scheduledDate": "2026-10-15" }] }'
+```
+
+Se espera `201 Created`. El `customerId` de la respuesta debe ser igual al `membershipId`
+(claim `sub`) de `laura.gomez@example.com` decodificado del token del paso 1 — nunca un
+valor inventado, porque el body ya no lleva `customerId`.
+
+## 6. Tenant `Inactivo` con un token emitido antes de desactivarlo (`409`)
+
+Con el mismo `TOKEN` del paso 1 (emitido cuando `travesia-natural` estaba `Activo`),
+desactivar el tenant (paso 5 de la sección "002") y repetir el `curl` del paso 5 de esta
+sección: se espera `409 Conflict` con `{"error":"tenant_inactive", ...}`. Reactivar el
+tenant al terminar (paso 6 de esa sección).
+
+## 7. Control: un endpoint no protegido sigue respondiendo igual sin token
+
+```bash
+curl -i http://localhost:8080/api/tenants
+```
+
+Se espera `200 OK`, igual que antes de esta spec — confirma que el resto de la API no
+quedó bloqueada por el nuevo filtro.
+
+## 8. Compilación y tests (spec 001 + spec 002 + spec 003 + spec 004 + spec 005 + spec 006 + spec 007)
+
+```bash
+./mvnw test
+```
+
+Deben seguir en verde `contextLoads` y los tests existentes, sin regresiones.
+
+---
+
+# Plan de verificación — 008 Gestión de descuentos operativos (catálogo)
+
+Corresponde a `specs/008-discount-management/`. Requiere la app corriendo (paso 4 de la
+primera sección) y Postgres arriba (paso 1). Reutiliza el tenant `travesia-natural`
+(debe estar `Activo`) y al menos un `catalogItemId` de tipo `TOUR` creado en la sección
+"005 — Catálogo operativo" (guardar ese id como `<catalogItemId>` para los pasos
+siguientes; si no existe, repetir el paso 1 de esa sección primero).
+
+Nota: este bloque **no** se puede invocar hoy desde `operator/discounts`,
+`new-discount`/`edit-discount` del Frontend (siguen simulando todo en `localStorage` vía
+`operator-discount.service.ts`). Toda esta verificación es directa contra el Backend.
+
+## 1. Verificar el esquema V6
+
+```bash
+docker exec -it multitour-postgres psql -U multitour -d multitour -c "\d discounts"
+```
+
+Se esperan las columnas `discount_id`, `tenant_id`, `catalog_item_id`, `percentage`,
+`valid_from`, `valid_to`, `priority`, `stackable`, `cap`, `base`, `active`,
+`created_at`, y `flyway_schema_history` mostrando `V6` aplicada.
+
+## 2. Crear un descuento válido (`201`)
+
+```bash
+curl -i -X POST http://localhost:8080/api/tenants/travesia-natural/discounts \
+  -H "Content-Type: application/json" \
+  -d '{
+        "catalogItemId": "<catalogItemId>",
+        "percentage": 15,
+        "validFrom": "2026-09-01",
+        "validTo": "2026-12-31",
+        "priority": 1,
+        "stackable": false,
+        "base": "original"
+      }'
+```
+
+Se espera `201 Created` con `active: true` y `base: "original"`. Guardar el
+`discountId` devuelto para los pasos siguientes.
+
+## 3. Rechazo por `catalogItemId` inexistente o de otro tenant (`404`)
+
+```bash
+curl -i -X POST http://localhost:8080/api/tenants/travesia-natural/discounts \
+  -H "Content-Type: application/json" \
+  -d '{ "catalogItemId": "00000000-0000-0000-0000-000000000000", "percentage": 10, "base": "original" }'
+```
+
+Se espera `404 Not Found`.
+
+## 4. Rechazo por datos inválidos (`400`)
+
+```bash
+curl -i -X POST http://localhost:8080/api/tenants/travesia-natural/discounts \
+  -H "Content-Type: application/json" \
+  -d '{ "catalogItemId": "<catalogItemId>", "percentage": 0, "base": "original" }'
+
+curl -i -X POST http://localhost:8080/api/tenants/travesia-natural/discounts \
+  -H "Content-Type: application/json" \
+  -d '{ "catalogItemId": "<catalogItemId>", "percentage": 150, "base": "original" }'
+
+curl -i -X POST http://localhost:8080/api/tenants/travesia-natural/discounts \
+  -H "Content-Type: application/json" \
+  -d '{ "catalogItemId": "<catalogItemId>", "percentage": 10, "validFrom": "2026-12-31", "validTo": "2026-01-01", "base": "original" }'
+```
+
+Se espera `400 Bad Request` en los tres, `{"error":"validation_error", ...}`, sin fila
+nueva persistida.
+
+## 5. Segundo descuento solapado sobre el mismo `catalogItemId` (`201`, no se bloquea)
+
+```bash
+curl -i -X POST http://localhost:8080/api/tenants/travesia-natural/discounts \
+  -H "Content-Type: application/json" \
+  -d '{
+        "catalogItemId": "<catalogItemId>",
+        "percentage": 20,
+        "validFrom": "2026-10-01",
+        "validTo": "2026-10-31",
+        "priority": 2,
+        "stackable": true,
+        "base": "subtotal"
+      }'
+```
+
+Se espera `201 Created` a pesar de que su vigencia se solapa con el descuento del paso 2
+sobre el mismo `catalogItemId` — confirma el criterio de aceptación "no se rechaza por
+solape" (RF-005A/RF-005B, ver `spec.md`).
+
+## 6. Listado del tenant (`200`)
+
+```bash
+curl -i http://localhost:8080/api/tenants/travesia-natural/discounts
+```
+
+Se espera `200 OK` con los dos descuentos creados en los pasos 2 y 5, y ninguno de los
+rechazados en los pasos 3-4.
+
+## 7. Obtener por id y aislamiento entre tenants (`404`)
+
+```bash
+curl -i http://localhost:8080/api/tenants/travesia-natural/discounts/<discountId-del-paso-2>
+curl -i http://localhost:8080/api/tenants/otro-operador/discounts/<discountId-del-paso-2>
+```
+
+El primero espera `200 OK`; el segundo (bajo otro tenant) espera `404 Not Found` — nunca
+revela el descuento de otro tenant.
+
+## 8. Actualización parcial (`200`)
+
+```bash
+curl -i -X PATCH http://localhost:8080/api/tenants/travesia-natural/discounts/<discountId-del-paso-2> \
+  -H "Content-Type: application/json" \
+  -d '{ "percentage": 25 }'
+```
+
+Se espera `200 OK` con `percentage: 25` y el resto de los campos (`validFrom`,
+`priority`, `base`, etc.) sin cambios.
+
+## 9. Desactivar y reactivar sin borrar (`200`, trazabilidad histórica)
+
+```bash
+curl -i -X POST http://localhost:8080/api/tenants/travesia-natural/discounts/<discountId-del-paso-2>/deactivate
+curl -i http://localhost:8080/api/tenants/travesia-natural/discounts/<discountId-del-paso-2>
+
+curl -i -X POST http://localhost:8080/api/tenants/travesia-natural/discounts/<discountId-del-paso-2>/reactivate
+```
+
+El primer `curl` espera `200 OK` con `active: false`; el segundo (`GET` directo)
+confirma que la fila sigue existiendo y siendo consultable; el tercero espera
+`200 OK` con `active: true`.
+
+## 10. Tenant inexistente (`404`) y tenant `Inactivo` (`409`)
+
+```bash
+curl -i http://localhost:8080/api/tenants/no-existe/discounts
+```
+
+Se espera `404 Not Found`. Luego, desactivar `travesia-natural` (paso 5 de la sección
+"002 — Tenant lifecycle") y repetir la creación del paso 2:
+
+```bash
+curl -i -X POST http://localhost:8080/api/tenants/travesia-natural/discounts \
+  -H "Content-Type: application/json" \
+  -d '{ "catalogItemId": "<catalogItemId>", "percentage": 10, "base": "original" }'
+```
+
+Se espera `409 Conflict` con `{"error":"tenant_inactive", ...}`. Reactivar el tenant al
+terminar (paso 6 de esa sección) para no dejar el ambiente inconsistente.
+
+## 11. Compilación y tests (spec 001 a spec 008)
+
+```bash
+./mvnw test
+```
+
+Deben seguir en verde `contextLoads` y los tests existentes, sin regresiones.
+
+---
+
+# Plan de verificación — 009 Registro de pago sobre una reserva
+
+Corresponde a `specs/009-reservation-payment/`. Requiere Postgres arriba (paso 1), la
+app corriendo (paso 4 de la primera sección), el tenant `travesia-natural` `Activo`, y
+un token válido de `laura.gomez@example.com` (sección "007", pasos 1-2) para crear
+reservas nuevas. Cada escenario usa su propia reserva porque los pagos son irreversibles
+sobre el mismo agregado.
+
+```bash
+TOKEN="<accessToken de la sección 007, paso 1>"
+```
+
+## 1. Efectivo que cubre exactamente el saldo (`200`, `Confirmada`)
+
+```bash
+curl -s -X POST http://localhost:8080/api/tenants/travesia-natural/reservations \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer ${TOKEN}" \
+  -d '{ "projectedValue": 300000, "reservedServices": [{ "serviceReference": "tour-laguna-verde" }] }'
+```
+
+Guardar el `reservationId` de la respuesta como `RES_A`, luego:
+
+```bash
+curl -i -X POST http://localhost:8080/api/tenants/travesia-natural/reservations/${RES_A}/payments \
+  -H "Content-Type: application/json" \
+  -d '{ "method": "EFECTIVO", "amount": 300000 }'
+```
+
+Se espera `200 OK` con `paymentStatus: "Pagado"`, `reservationStatus: "Confirmada"`,
+`pendingBalance: 0`.
+
+## 2. Efectivo insuficiente (`400`, sin cambios)
+
+Repetir la creación del paso 1 para obtener `RES_B` (`projectedValue: 300000`), luego:
+
+```bash
+curl -i -X POST http://localhost:8080/api/tenants/travesia-natural/reservations/${RES_B}/payments \
+  -H "Content-Type: application/json" \
+  -d '{ "method": "EFECTIVO", "amount": 200000 }'
+```
+
+Se espera `400 Bad Request`. Confirmar con
+`curl -s http://localhost:8080/api/tenants/travesia-natural/reservations/${RES_B}` que
+`pendingBalance` sigue en `300000` y `paymentStatus` en `"Sin pago"`.
+
+## 3. Abono parcial y abono que completa (`200` en ambos, `Confirmada` al completar)
+
+Crear `RES_C` (`projectedValue: 300000`), luego:
+
+```bash
+curl -i -X POST http://localhost:8080/api/tenants/travesia-natural/reservations/${RES_C}/payments \
+  -H "Content-Type: application/json" \
+  -d '{ "method": "ABONO", "amount": 100000 }'
+```
+
+Se espera `200 OK`, `paymentStatus: "Parcial"`, `pendingBalance: 200000`,
+`reservationStatus` sigue `"Pendiente de pago"`. Luego:
+
+```bash
+curl -i -X POST http://localhost:8080/api/tenants/travesia-natural/reservations/${RES_C}/payments \
+  -H "Content-Type: application/json" \
+  -d '{ "method": "ABONO", "amount": 200000 }'
+```
+
+Se espera `200 OK`, `paymentStatus: "Pagado"`, `reservationStatus: "Confirmada"`,
+`pendingBalance: 0`.
+
+## 4. Transferencia: registro, aprobación y doble decisión (`200`, `200`, `409`)
+
+Crear `RES_D` (`projectedValue: 300000`), luego:
+
+```bash
+curl -i -X POST http://localhost:8080/api/tenants/travesia-natural/reservations/${RES_D}/payments \
+  -H "Content-Type: application/json" \
+  -d '{ "method": "TRANSFERENCIA", "amount": 300000, "supportReference": "comprobante-001.png" }'
+```
+
+Se espera `200 OK`, `paymentStatus: "En validacion"`, `pendingBalance` sigue en `300000`
+(no se aplica todavía). Luego, aprobar sin `reason` (`400`):
+
+```bash
+curl -i -X POST http://localhost:8080/api/tenants/travesia-natural/reservations/${RES_D}/payments/decide-support \
+  -H "Content-Type: application/json" \
+  -d '{ "decision": "APPROVE", "actorId": "admin" }'
+```
+
+Se espera `400 Bad Request`. Ahora con `reason`:
+
+```bash
+curl -i -X POST http://localhost:8080/api/tenants/travesia-natural/reservations/${RES_D}/payments/decide-support \
+  -H "Content-Type: application/json" \
+  -d '{ "decision": "APPROVE", "reason": "Comprobante verificado en el banco", "actorId": "admin" }'
+```
+
+Se espera `200 OK`, `paymentStatus: "Pagado"`, `reservationStatus: "Confirmada"`,
+`pendingBalance: 0` — igual que un Abono. Repetir el mismo `curl` una segunda vez: se
+espera `409 Conflict` con `{"error":"payment_already_resolved", ...}`.
+
+## 5. Transferencia rechazada (`200`, sin tocar el saldo)
+
+Crear `RES_E` (`projectedValue: 300000`) y registrar una transferencia igual que en el
+paso 4. Luego:
+
+```bash
+curl -i -X POST http://localhost:8080/api/tenants/travesia-natural/reservations/${RES_E}/payments/decide-support \
+  -H "Content-Type: application/json" \
+  -d '{ "decision": "REJECT", "reason": "Comprobante ilegible", "actorId": "admin" }'
+```
+
+Se espera `200 OK`, `paymentStatus: "Rechazado"`, `pendingBalance` sigue en `300000`.
+Repetir el mismo `curl`: se espera `409 Conflict`.
+
+## 6. Listado de soportes pendientes por tenant (`200`, aislado por tenant)
+
+Crear `RES_F` (`projectedValue: 300000`) y registrar una transferencia sin decidirla
+(igual que el paso 4, sin llamar a `decide-support`). Luego:
+
+```bash
+curl -s http://localhost:8080/api/tenants/travesia-natural/reservations/pending-support
+```
+
+Se espera `200 OK` con exactamente `RES_F` en la lista (`RES_D` y `RES_E` ya quedaron
+resueltas en los pasos 4-5). Confirmar aislamiento con un segundo tenant `Activo`
+(por ejemplo el creado en la sección "002"): su `GET .../pending-support` no debe
+incluir `RES_F`.
+
+## 7. Nota de seguimiento (`201`, consultable en orden cronológico)
+
+Sobre `RES_C` (saldo ya en `0` tras el paso 3 — el criterio no exige saldo pendiente
+para registrar la nota, solo que no cambie ningún estado):
+
+```bash
+curl -i -X POST http://localhost:8080/api/tenants/travesia-natural/reservations/${RES_C}/payments/followups \
+  -H "Content-Type: application/json" \
+  -d '{ "note": "Cliente confirma que el comprobante llega por correo", "actorId": "admin" }'
+```
+
+Se espera `201 Created`. Luego:
+
+```bash
+curl -s http://localhost:8080/api/tenants/travesia-natural/reservations/${RES_C}/payments/followups
+```
+
+Se espera `200 OK` con la nota del paso anterior, y `paymentStatus`/`reservationStatus`
+de `RES_C` sin cambios respecto al paso 3.
+
+## 8. Tenant inexistente (`404`) y tenant `Inactivo` (`409`)
+
+```bash
+curl -i -X POST http://localhost:8080/api/tenants/no-existe/reservations/${RES_C}/payments \
+  -H "Content-Type: application/json" \
+  -d '{ "method": "ABONO", "amount": 1000 }'
+```
+
+Se espera `404 Not Found`. Luego, desactivar `travesia-natural` (paso 5 de la sección
+"002") y repetir cualquier operación de pago sobre `RES_C`: se espera
+`409 Conflict` con `{"error":"tenant_inactive", ...}`. Reactivar el tenant al terminar
+(paso 6 de esa sección).
+
+## 9. Compilación y tests (spec 001 a spec 009)
+
+```bash
+./mvnw test
+```
+
+Deben seguir en verde `contextLoads` y los tests existentes, sin regresiones.
+
+# Plan de verificación — 010 Ejecución de reservas y costos operacionales
+
+Corresponde a `specs/010-execution-and-operational-costs/`. Requiere Postgres arriba, la
+app corriendo, el tenant `travesia-natural` `Activo`, y un token válido de
+`laura.gomez@example.com` (sección "007", pasos 1-2) para crear reservas nuevas. Cada
+reserva usada se paga primero en efectivo (igual que sección "009", paso 1) para
+llevarla a `Confirmada`, único estado desde el que se puede iniciar ejecución.
+
+```bash
+TOKEN="<accessToken de la sección 007, paso 1>"
+```
+
+## 1. Registrar ejecución prestada sobre una reserva `Confirmada` (`200`)
+
+Crear una reserva y pagarla en efectivo (igual que sección "009", paso 1) para obtener
+`RES_G` en estado `Confirmada`:
+
+```bash
+curl -s -X POST http://localhost:8080/api/tenants/travesia-natural/reservations \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer ${TOKEN}" \
+  -d '{ "projectedValue": 300000, "reservedServices": [{ "serviceReference": "tour-laguna-verde" }] }'
+```
+
+Guardar el `reservationId` como `RES_G`, pagarla:
+
+```bash
+curl -i -X POST http://localhost:8080/api/tenants/travesia-natural/reservations/${RES_G}/payments \
+  -H "Content-Type: application/json" \
+  -d '{ "method": "EFECTIVO", "amount": 300000 }'
+```
+
+Y registrar la ejecución:
+
+```bash
+curl -i -X POST http://localhost:8080/api/tenants/travesia-natural/reservations/${RES_G}/execution \
+  -H "Content-Type: application/json" \
+  -d '{ "served": true, "executed": 4, "actorId": "guia-1" }'
+```
+
+Se espera `200 OK` con `served: true`, `executed: 4`, `causal: null`. Confirmar con
+`curl -s http://localhost:8080/api/tenants/travesia-natural/reservations/${RES_G}` que
+`reservationStatus` pasó a `"En ejecucion"`.
+
+## 2. Ejecución no prestada: sin causal `400`, con causal `200`
+
+Crear y pagar `RES_H` igual que en el paso 1. Luego, sin `causal`:
+
+```bash
+curl -i -X POST http://localhost:8080/api/tenants/travesia-natural/reservations/${RES_H}/execution \
+  -H "Content-Type: application/json" \
+  -d '{ "served": false, "actorId": "guia-1" }'
+```
+
+Se espera `400 Bad Request` con `{"error":"validation_error", ...}`. Ahora con
+`causal`:
+
+```bash
+curl -i -X POST http://localhost:8080/api/tenants/travesia-natural/reservations/${RES_H}/execution \
+  -H "Content-Type: application/json" \
+  -d '{ "served": false, "causal": "Cliente no se presento", "actorId": "guia-1" }'
+```
+
+Se espera `200 OK` con `served: false`, `executed: null`,
+`causal: "Cliente no se presento"`, y `reservationStatus: "En ejecucion"` (misma
+transición que si se hubiera prestado).
+
+## 3. Ejecución sobre una reserva no `Confirmada` (`409`)
+
+Crear `RES_I` sin pagarla (queda `Pendiente de pago`):
+
+```bash
+curl -i -X POST http://localhost:8080/api/tenants/travesia-natural/reservations/${RES_I}/execution \
+  -H "Content-Type: application/json" \
+  -d '{ "served": true, "executed": 2, "actorId": "guia-1" }'
+```
+
+Se espera `409 Conflict` con `{"error":"reservation_not_executable", ...}`, y la reserva
+sigue `Pendiente de pago` sin cambios.
+
+## 4. Segunda ejecución sobre una reserva ya ejecutada (`409`)
+
+Repetir sobre `RES_G` (ya ejecutada en el paso 1) el mismo `curl` del paso 1: se espera
+`409 Conflict` con `{"error":"reservation_not_executable", ...}`.
+
+## 5. Consultar la ejecución registrada de una reserva (`200`)
+
+```bash
+curl -s http://localhost:8080/api/tenants/travesia-natural/reservations/${RES_G}/execution
+```
+
+Se espera `200 OK` con los mismos datos guardados en el paso 1
+(`served`, `executed`, `causal`, `actorId`, `recordedAt`).
+
+## 6. Listado de reservas pendientes de ejecución (`200`, aislado por tenant)
+
+Crear y pagar `RES_J` igual que en el paso 1, pero sin ejecutarla. Luego:
+
+```bash
+curl -s http://localhost:8080/api/tenants/travesia-natural/reservations/pending-execution
+```
+
+Se espera `200 OK` con exactamente `RES_J` en la lista: `RES_G` y `RES_H` ya pasaron a
+`En ejecucion` (pasos 1-2) y `RES_I` sigue `Pendiente de pago` (paso 3), ninguna de las
+dos aplica. Confirmar aislamiento con un segundo tenant `Activo` (por ejemplo el creado
+en la sección "002"): su `GET .../pending-execution` no debe incluir `RES_J`.
+
+## 7. Costo operacional sin ejecución iniciada (`409`)
+
+Sobre `RES_J` (`Confirmada`, sin ejecución todavía):
+
+```bash
+curl -i -X POST http://localhost:8080/api/tenants/travesia-natural/reservations/${RES_J}/costs \
+  -H "Content-Type: application/json" \
+  -d '{ "concept": "Combustible", "amount": 50000, "actorId": "guia-1" }'
+```
+
+Se espera `409 Conflict` con `{"error":"execution_not_started", ...}`.
+
+## 8. Costo operacional con concepto/monto inválido (`400`)
+
+Sobre `RES_G` (ya en `En ejecucion` desde el paso 1):
+
+```bash
+curl -i -X POST http://localhost:8080/api/tenants/travesia-natural/reservations/${RES_G}/costs \
+  -H "Content-Type: application/json" \
+  -d '{ "concept": "", "amount": 50000, "actorId": "guia-1" }'
+```
+
+Se espera `400 Bad Request`. Repetir con `"amount": 0` y concepto no vacío: también
+`400 Bad Request`.
+
+## 9. Costo operacional válido y segundo costo acumulado (`201`)
+
+```bash
+curl -i -X POST http://localhost:8080/api/tenants/travesia-natural/reservations/${RES_G}/costs \
+  -H "Content-Type: application/json" \
+  -d '{ "concept": "Combustible", "amount": 50000, "actorId": "guia-1" }'
+```
+
+Se espera `201 Created`. Luego un segundo costo:
+
+```bash
+curl -i -X POST http://localhost:8080/api/tenants/travesia-natural/reservations/${RES_G}/costs \
+  -H "Content-Type: application/json" \
+  -d '{ "concept": "Almuerzo del grupo", "amount": 30000, "actorId": "guia-1" }'
+```
+
+Se espera `201 Created`, sin reemplazar el costo anterior.
+
+## 10. Listado de costos en orden cronológico (`200`)
+
+```bash
+curl -s http://localhost:8080/api/tenants/travesia-natural/reservations/${RES_G}/costs
+```
+
+Se espera `200 OK` con los dos costos del paso 9, en el orden en que se registraron
+(`Combustible` antes que `Almuerzo del grupo`).
+
+## 11. Tenant inexistente (`404`) y tenant `Inactivo` (`409`)
+
+```bash
+curl -i -X POST http://localhost:8080/api/tenants/no-existe/reservations/${RES_G}/execution \
+  -H "Content-Type: application/json" \
+  -d '{ "served": true, "executed": 1, "actorId": "guia-1" }'
+```
+
+Se espera `404 Not Found`. Luego, desactivar `travesia-natural` (paso 5 de la sección
+"002") y repetir cualquier operación de ejecución/costos: se espera `409 Conflict` con
+`{"error":"tenant_inactive", ...}`. Reactivar el tenant al terminar (paso 6 de esa
+sección).
+
+## 12. Compilación y tests (spec 001 a spec 010)
+
+```bash
+./mvnw test
+```
+
+Deben seguir en verde `contextLoads` y los tests existentes, sin regresiones.
+
+## Hallazgos de esta verificación
+
+La ejecución manual de los pasos 1-11 encontró tres fallos reales, corregidos antes de
+cerrar la spec:
+
+1. `RegisterExecutionService` validaba `Execution.create(...)` (que puede lanzar
+   `IllegalArgumentException`) *después* de guardar la transición de la reserva a
+   `EN_EJECUCION`. Una ejecución no prestada sin causal (paso 2) devolvía `400` pero
+   dejaba la reserva corrompida en `EN_EJECUCION`. Se reordenó: validar primero,
+   mutar/guardar después.
+2. La migración `V8` declaró `executed INTEGER NOT NULL`, pero el dominio fija
+   `executed = null` cuando `served = false`. Causaba `500` al registrar una ejecución
+   no prestada. Se agregó `V9__make_execution_executed_nullable.sql` (no se edita `V8`
+   ya aplicada).
+3. El guardado de `Reservation` y de `Execution` no estaba en una única transacción: si
+   el segundo guardado fallaba (como en el bug 2), la reserva quedaba en
+   `EN_EJECUCION` sin ejecución asociada, sin forma de reintentar. Se agregó
+   `@Transactional` a `RegisterExecutionService.registerExecution()`.
+
+# Plan de verificación — 011 Cancelación de reserva antes de ejecución
+
+Corresponde a `specs/011-reservation-cancellation/`. Requiere Postgres arriba, la app
+corriendo, el tenant `travesia-natural` `Activo`, y un token válido de
+`laura.gomez@example.com` (sección "007", pasos 1-2) para crear reservas nuevas.
+
+```bash
+TOKEN="<accessToken de la sección 007, paso 1>"
+```
+
+## 1. Cancelar una reserva `Pendiente de pago` sin pagos (`200`)
+
+```bash
+curl -s -X POST http://localhost:8080/api/tenants/travesia-natural/reservations \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer ${TOKEN}" \
+  -d '{ "projectedValue": 200000, "reservedServices": [{ "serviceReference": "tour-laguna-verde" }] }'
+```
+
+Guardar el `reservationId` como `RES_K`, sin registrar ningún pago. Cancelarla:
+
+```bash
+curl -i -X POST http://localhost:8080/api/tenants/travesia-natural/reservations/${RES_K}/cancel \
+  -H "Content-Type: application/json" \
+  -d '{ "reason": "Cliente desistio del viaje", "actorId": "operador-1" }'
+```
+
+Se espera `200 OK` con `reservationStatus: "Cancelada"`, `creditBalance: 0` y
+`paymentStatus: "Sin pago"` (sin cambios).
+
+## 2. Cancelar una reserva `Confirmada` con el valor completo pagado (`200`, saldo a favor)
+
+Crear `RES_L` igual que en el paso 1 y pagarla en efectivo (igual que sección "009",
+paso 1) para llevarla a `Confirmada`:
+
+```bash
+curl -i -X POST http://localhost:8080/api/tenants/travesia-natural/reservations/${RES_L}/payments \
+  -H "Content-Type: application/json" \
+  -d '{ "method": "EFECTIVO", "amount": 200000 }'
+```
+
+Cancelarla:
+
+```bash
+curl -i -X POST http://localhost:8080/api/tenants/travesia-natural/reservations/${RES_L}/cancel \
+  -H "Content-Type: application/json" \
+  -d '{ "reason": "Cliente desistio del viaje", "actorId": "operador-1" }'
+```
+
+Se espera `200 OK` con `reservationStatus: "Cancelada"`, `creditBalance: 200000` y
+`paymentStatus: "Saldo a favor pendiente"`.
+
+## 3. Cancelar una reserva con un abono parcial (`200`, saldo a favor parcial)
+
+Crear `RES_M` igual que en el paso 1 (`projectedValue: 200000`) y abonar solo una
+parte:
+
+```bash
+curl -i -X POST http://localhost:8080/api/tenants/travesia-natural/reservations/${RES_M}/payments \
+  -H "Content-Type: application/json" \
+  -d '{ "method": "ABONO", "amount": 80000 }'
+```
+
+Cancelarla:
+
+```bash
+curl -i -X POST http://localhost:8080/api/tenants/travesia-natural/reservations/${RES_M}/cancel \
+  -H "Content-Type: application/json" \
+  -d '{ "reason": "Cliente desistio del viaje", "actorId": "operador-1" }'
+```
+
+Se espera `200 OK` con `creditBalance: 80000` (solo lo efectivamente abonado, no los
+200000 del valor total).
+
+## 4. Cancelar sin motivo (`400`)
+
+```bash
+curl -i -X POST http://localhost:8080/api/tenants/travesia-natural/reservations/${RES_K}/cancel \
+  -H "Content-Type: application/json" \
+  -d '{ "actorId": "operador-1" }'
+```
+
+(Usar una reserva nueva sin cancelar todavía si `RES_K` ya quedó `Cancelada`.) Se
+espera `400 Bad Request` con `{"error":"validation_error", ...}`.
+
+## 5. Cancelar sobre un estado inválido (`409`)
+
+Repetir sobre `RES_K` (ya `Cancelada` desde el paso 1) el mismo `curl` del paso 1: se
+espera `409 Conflict` con `{"error":"reservation_not_cancellable", ...}`, y la reserva
+no cambia. Repetir el mismo caso llevando otra reserva hasta `En ejecucion` (igual que
+sección "010", paso 1) e intentando cancelarla: mismo resultado.
+
+## 6. Cancelar con una transferencia pendiente de decidir (`409`)
+
+Crear `RES_N` igual que en el paso 1 y registrar una transferencia con soporte (igual
+que sección "009"):
+
+```bash
+curl -i -X POST http://localhost:8080/api/tenants/travesia-natural/reservations/${RES_N}/payments \
+  -H "Content-Type: application/json" \
+  -d '{ "method": "TRANSFERENCIA", "amount": 200000, "supportReference": "comprobante-001" }'
+```
+
+Intentar cancelarla sin resolver la transferencia:
+
+```bash
+curl -i -X POST http://localhost:8080/api/tenants/travesia-natural/reservations/${RES_N}/cancel \
+  -H "Content-Type: application/json" \
+  -d '{ "reason": "Cliente desistio del viaje", "actorId": "operador-1" }'
+```
+
+Se espera `409 Conflict` con `{"error":"reservation_not_cancellable", ...}`, y la
+reserva no cambia.
+
+## 7. Consultar una reserva cancelada (`200`, motivo y actor visibles)
+
+```bash
+curl -s http://localhost:8080/api/tenants/travesia-natural/reservations/${RES_L}
+```
+
+Se espera `200 OK` con `reservationStatus: "Cancelada"`, `creditBalance: 200000`,
+`paymentStatus: "Saldo a favor pendiente"`, `cancellationReason: "Cliente desistio del
+viaje"` y `cancelledBy: "operador-1"`.
+
+## 8. Tenant inexistente (`404`) y tenant `Inactivo` (`409`)
+
+```bash
+curl -i -X POST http://localhost:8080/api/tenants/no-existe/reservations/${RES_K}/cancel \
+  -H "Content-Type: application/json" \
+  -d '{ "reason": "Cliente desistio del viaje", "actorId": "operador-1" }'
+```
+
+Se espera `404 Not Found`. Luego, desactivar `travesia-natural` (paso 5 de la sección
+"002") y repetir la cancelación: se espera `409 Conflict` con
+`{"error":"tenant_inactive", ...}`. Reactivar el tenant al terminar (paso 6 de esa
+sección).
+
+## 9. Compilación y tests (spec 001 a spec 011)
+
+```bash
+./mvnw test
+```
+
+Deben seguir en verde `contextLoads` y los tests existentes, sin regresiones.
+
+# Plan de verificación — 012 Ejecución de devolución sobre saldo a favor
+
+Corresponde a `specs/012-reservation-refund-execution/`. Requiere Postgres arriba, la
+app corriendo, el tenant `travesia-natural` `Activo`, y un token válido de
+`laura.gomez@example.com` (sección "007", pasos 1-2) para crear reservas nuevas. Usa
+`RES_L`, `RES_M` y `RES_K` ya generadas en la sección "011" (paga/cancela igual que ahí
+si se ejecuta esta sección de forma aislada).
+
+```bash
+TOKEN="<accessToken de la sección 007, paso 1>"
+```
+
+## 1. Ejecutar devolución total (`200`, `creditBalance` en cero)
+
+`RES_L` viene de la sección "011" paso 2: `Cancelada`, `creditBalance: 200000`,
+`paymentStatus: "Saldo a favor pendiente"`. Ejecutar la devolución completa:
+
+```bash
+curl -i -X POST http://localhost:8080/api/tenants/travesia-natural/reservations/${RES_L}/refund \
+  -H "Content-Type: application/json" \
+  -d '{ "amount": 200000, "reason": "Devolucion acordada con el cliente", "actorId": "admin-1", "method": "Transferencia" }'
+```
+
+Se espera `200 OK` con `creditBalance: 0`, `paymentStatus: "Devuelto parcial o
+total"`, `refundedAmount: 200000`, `refundReason`, `refundedBy: "admin-1"`,
+`refundMethod: "Transferencia"` y `refundedAt` presentes.
+
+## 2. Ejecutar devolución parcial (`200`, `creditBalance` reducido, no en cero)
+
+`RES_M` viene de la sección "011" paso 3: `Cancelada`, `creditBalance: 80000`,
+`paymentStatus: "Saldo a favor pendiente"`. Devolver solo una parte:
+
+```bash
+curl -i -X POST http://localhost:8080/api/tenants/travesia-natural/reservations/${RES_M}/refund \
+  -H "Content-Type: application/json" \
+  -d '{ "amount": 30000, "reason": "Devolucion parcial acordada", "actorId": "admin-1", "method": "Efectivo" }'
+```
+
+Se espera `200 OK` con `creditBalance: 50000` (no en cero) y `paymentStatus: "Devuelto
+parcial o total"`.
+
+## 3. Devolución con monto mayor al `creditBalance` disponible (`400`)
+
+Crear `RES_P` igual que en la sección "011" paso 2 (pagar en efectivo el valor
+completo y cancelarla), quedando `creditBalance: 200000`. Intentar devolver más de lo
+disponible:
+
+```bash
+curl -i -X POST http://localhost:8080/api/tenants/travesia-natural/reservations/${RES_P}/refund \
+  -H "Content-Type: application/json" \
+  -d '{ "amount": 999999, "reason": "Devolucion acordada", "actorId": "admin-1", "method": "Efectivo" }'
+```
+
+Se espera `400 Bad Request` con `{"error":"validation_error", ...}`, y la reserva no
+cambia (`creditBalance` sigue en `200000`).
+
+## 4. Devolución sin motivo o sin actor (`400`)
+
+Sobre la misma `RES_P` (sin modificar por el paso anterior):
+
+```bash
+curl -i -X POST http://localhost:8080/api/tenants/travesia-natural/reservations/${RES_P}/refund \
+  -H "Content-Type: application/json" \
+  -d '{ "amount": 200000, "actorId": "admin-1", "method": "Efectivo" }'
+```
+
+Se espera `400 Bad Request` con `{"error":"validation_error", ...}` (falta `reason`).
+Repetir omitiendo `actorId` en su lugar: mismo resultado.
+
+## 5. Devolución sobre una reserva sin `Saldo a favor pendiente` (`409`)
+
+Tres casos, todos deben devolver `409 Conflict` con
+`{"error":"reservation_not_refundable", ...}` sin modificar la reserva:
+
+- `RES_K` (sección "011" paso 1: `Cancelada` sin pagos, `paymentStatus: "Sin pago"`).
+- Una reserva `Confirmada` sin cancelar (ej. crear una nueva y pagarla en efectivo,
+  igual que sección "009" paso 1, sin cancelarla).
+- `RES_L`, ya `Devuelto parcial o total` desde el paso 1 de esta sección (repetir el
+  mismo `curl` del paso 1).
+
+## 6. Consultar una reserva con devolución ejecutada (`200`, campos visibles)
+
+```bash
+curl -s http://localhost:8080/api/tenants/travesia-natural/reservations/${RES_L}
+```
+
+Se espera `200 OK` con `paymentStatus: "Devuelto parcial o total"`,
+`creditBalance: 0`, `refundedAmount: 200000`, `refundReason`,
+`refundedBy: "admin-1"`, `refundMethod: "Transferencia"` y `refundedAt`.
+
+## 7. Tenant inexistente (`404`) y tenant `Inactivo` (`409`)
+
+```bash
+curl -i -X POST http://localhost:8080/api/tenants/no-existe/reservations/${RES_M}/refund \
+  -H "Content-Type: application/json" \
+  -d '{ "amount": 1000, "reason": "Devolucion", "actorId": "admin-1", "method": "Efectivo" }'
+```
+
+Se espera `404 Not Found`. Luego, desactivar `travesia-natural` (paso 5 de la sección
+"002") y repetir la devolución: se espera `409 Conflict` con
+`{"error":"tenant_inactive", ...}`. Reactivar el tenant al terminar (paso 6 de esa
+sección).
+
+## 8. Compilación y tests (spec 001 a spec 012)
+
+```bash
+./mvnw test
+```
+
+Deben seguir en verde `contextLoads` y los tests existentes, sin regresiones.
+
+# Plan de verificación — 013 Caja diaria
+
+Todos los endpoints cuelgan de `/api/tenants/{tenantId}/cash`, usando `travesia-natural`
+(debe estar `Activo`). Guardar el `cashRegisterId` devuelto en `${CASH_ID}` para los
+pasos siguientes.
+
+## 1. Abrir caja del día (`201`)
+
+```bash
+curl -i -X POST http://localhost:8080/api/tenants/travesia-natural/cash \
+  -H "Content-Type: application/json" \
+  -d '{ "businessDate": "2026-09-04", "baseAmount": 50000, "actorId": "admin-1" }'
+```
+
+Se espera `201 Created` con `status: "ABIERTA"`, `baseAmount: 50000`, `movements: []`,
+`corrections: []`, `totalAmount: null`.
+
+## 2. Abrir una segunda caja para la misma fecha (`409`)
+
+```bash
+curl -i -X POST http://localhost:8080/api/tenants/travesia-natural/cash \
+  -H "Content-Type: application/json" \
+  -d '{ "businessDate": "2026-09-04", "baseAmount": 10000, "actorId": "admin-1" }'
+```
+
+Se espera `409 Conflict` con `{"error":"conflict", ...}` (`CashRegisterAlreadyOpenException`).
+
+## 3. Registrar movimientos `INGRESO`, `PAGO` y `GASTO` (`201`)
+
+```bash
+curl -i -X POST http://localhost:8080/api/tenants/travesia-natural/cash/${CASH_ID}/movements \
+  -H "Content-Type: application/json" \
+  -d '{ "type": "INGRESO", "amount": 100000, "concept": "Venta de tour", "actorId": "admin-1" }'
+
+curl -i -X POST http://localhost:8080/api/tenants/travesia-natural/cash/${CASH_ID}/movements \
+  -H "Content-Type: application/json" \
+  -d '{ "type": "PAGO", "amount": 20000, "concept": "Pago a guía", "actorId": "admin-1" }'
+
+curl -i -X POST http://localhost:8080/api/tenants/travesia-natural/cash/${CASH_ID}/movements \
+  -H "Content-Type: application/json" \
+  -d '{ "type": "GASTO", "amount": 5000, "concept": "Combustible", "actorId": "admin-1" }'
+```
+
+Cada uno responde `201 Created` con el movimiento añadido a la lista `movements` y
+`totalAmount` sigue `null` (caja `ABIERTA`, todavía sin congelar).
+
+## 4. Registrar un movimiento `DEVOLUCION` (`400`)
+
+Las devoluciones nunca se registran como movimiento manual: se calculan en vivo desde
+`reservations` (paso 5). `CashMovementType` deliberadamente no incluye `DEVOLUCION`:
+
+```bash
+curl -i -X POST http://localhost:8080/api/tenants/travesia-natural/cash/${CASH_ID}/movements \
+  -H "Content-Type: application/json" \
+  -d '{ "type": "DEVOLUCION", "amount": 1000, "concept": "Devolucion manual", "actorId": "admin-1" }'
+```
+
+Se espera `400 Bad Request` con `{"error":"validation_error", ...}`
+(`CashMovementType.valueOf("DEVOLUCION")` lanza `IllegalArgumentException`).
+
+## 5. Consultar la caja abierta con total en vivo (`200`)
+
+```bash
+curl -s "http://localhost:8080/api/tenants/travesia-natural/cash?businessDate=2026-09-04"
+```
+
+Se espera `200 OK` con `status: "ABIERTA"` y `totalAmount` calculado en vivo como
+`baseAmount + ingresos - pagos - gastos - devoluciones del día` (sin persistirse:
+`GET` sucesivos recalculan, no guardan). Las devoluciones se traen de reservas reales
+con `refundedAt` ese mismo `businessDate` (sección "012"): si hay reservas devueltas
+ese día, el total las descuenta aunque no exista ningún movimiento `DEVOLUCION`
+persistido — es la integración cruzada `cash` → `reservations` (`RefundsTotalCalculator`).
+
+## 6. Cerrar la caja (`200`, total congelado)
+
+```bash
+curl -i -X POST http://localhost:8080/api/tenants/travesia-natural/cash/${CASH_ID}/close \
+  -H "Content-Type: application/json" \
+  -d '{ "actorId": "admin-1" }'
+```
+
+Se espera `200 OK` con `status: "CERRADA"`, `closedBy: "admin-1"`, `closedAt` presente y
+`totalAmount` fijado (igual al total en vivo del paso 5, ya congelado). Repetir el mismo
+`GET` del paso 5: el total ya no cambia aunque cambien las reservas de ese día.
+
+## 7. Cerrar una caja ya cerrada (`409`)
+
+```bash
+curl -i -X POST http://localhost:8080/api/tenants/travesia-natural/cash/${CASH_ID}/close \
+  -H "Content-Type: application/json" \
+  -d '{ "actorId": "admin-1" }'
+```
+
+Se espera `409 Conflict` con `{"error":"conflict", ...}` (`CashRegisterClosedException`).
+
+## 8. Corrección sobre caja `CERRADA` (`201`) y sobre caja `ABIERTA` (`409`)
+
+```bash
+curl -i -X POST http://localhost:8080/api/tenants/travesia-natural/cash/${CASH_ID}/corrections \
+  -H "Content-Type: application/json" \
+  -d '{ "justification": "Ajuste por diferencia de arqueo", "actorId": "admin-1" }'
+```
+
+Se espera `201 Created` con la corrección añadida a `corrections`. Abrir una caja nueva
+en otra fecha (repetir el paso 1 con `"businessDate": "2026-09-05"`) e intentar corregirla
+sin cerrarla primero:
+
+```bash
+curl -i -X POST http://localhost:8080/api/tenants/travesia-natural/cash/${CASH_ID_2}/corrections \
+  -H "Content-Type: application/json" \
+  -d '{ "justification": "Ajuste prematuro", "actorId": "admin-1" }'
+```
+
+Se espera `409 Conflict` con `{"error":"conflict", ...}` (`CashRegisterNotClosedException`).
+Cerrar esa segunda caja al terminar (paso 6) para no dejarla `ABIERTA`.
+
+## 9. Histórico de cajas cerradas (`200`)
+
+```bash
+curl -s http://localhost:8080/api/tenants/travesia-natural/cash/history
+```
+
+Se espera `200 OK` con la lista de cajas `CERRADA` del tenant, incluyendo las dos
+abiertas/cerradas en los pasos anteriores, cada una con su `totalAmount` congelado.
+
+## 10. Consolidación mensual (`200`)
+
+```bash
+curl -s "http://localhost:8080/api/tenants/travesia-natural/cash/consolidation?period=2026-09"
+```
+
+Se espera `200 OK` con una lista de un elemento: `period: "2026-09"`, `ingresos`,
+`pagosOperacionales`, `gastos`, `devoluciones`, `cancelaciones` y `costosOperacionales`
+agregados sobre las cajas cerradas del mes. `total` = `ingresos - pagosOperacionales -
+gastos - devoluciones`, **sin sumar `baseAmount`** de cada caja (RN-CAJ-001: "sin sumar
+repetidamente cada base diaria").
+
+## 11. Tenant inexistente (`404`) y tenant `Inactivo` (`409`)
+
+```bash
+curl -i http://localhost:8080/api/tenants/no-existe/cash?businessDate=2026-09-04
+```
+
+Se espera `404 Not Found`. Desactivar `travesia-natural` (paso 5 de la sección "002") y
+repetir cualquier operación de caja (ej. el `GET` anterior con el tenant real): se
+espera `409 Conflict` con `{"error":"tenant_inactive", ...}` — aplica a las 6 operaciones
+de caja, no solo a la apertura. Reactivar el tenant al terminar (paso 6 de esa sección).
+
+## 12. Fecha sin caja abierta (`404`)
+
+```bash
+curl -i "http://localhost:8080/api/tenants/travesia-natural/cash?businessDate=2020-01-01"
+```
+
+Se espera `404 Not Found` con `{"error":"not_found", ...}` (`CashRegisterNotFoundException`).
+
+## 13. Compilación y tests (spec 001 a spec 013)
+
+```bash
+./mvnw test
+```
+
+Deben seguir en verde `contextLoads` y los tests existentes, sin regresiones.
+
+# Plan de verificación — Corrección de persistencia (agregados con hijos)
+
+Hallazgo de `/code-review` sobre spec 013: `CashRegisterRepositoryAdapter.save()`
+reconstruía el agregado completo (todos los movimientos/correcciones como entidades
+nuevas sin id) en cada guardado; como `orphanRemoval = true` no puede emparejarlas con
+las filas ya persistidas, cada guardado borraba y reinsertaba todo el historial. El
+mismo patrón existía en `ReservationRepositoryAdapter` desde spec 001 (reescribía
+`reservedServices` en cada pago/cancelación aunque nunca cambian tras la creación).
+Corregido en `cash` y `reservations`: se carga la entidad existente por id y solo se
+actualizan los campos escalares / se insertan los hijos nuevos, sin tocar los hijos ya
+persistidos. Se agregó `@OrderBy("id ASC")` a las colecciones `@OneToMany` de ambos
+módulos para que el orden de lectura sea determinista (necesario para poder distinguir
+"hijos ya persistidos" de "hijos nuevos" por posición en la lista).
+
+`operations` (`OperationCostRepositoryAdapter`, `ExecutionRepositoryAdapter`) se evaluó
+para uniformidad pero se dejó como inserción directa: `OperationCost` y `Execution` son
+entidades planas sin colecciones hijas y sin caso de uso de edición (se crean una sola
+vez), así que el mismo patrón de "cargar antes de escribir" ahí solo agrega un `SELECT`
+que siempre falla, sin corregir ningún bug real. Verificado además que el Frontend
+(repo `Multitour-Monolito-Portal`) hoy solo consume `reservations` — no tiene ninguna
+pantalla que toque `cash` ni `operations` — por lo que no hay necesidad funcional de
+tocar ese módulo ahora.
+
+## 1. Caja: movimientos incrementales no se pierden ni se duplican
+
+```bash
+CASH_ID=$(curl -s -X POST http://localhost:8080/api/tenants/travesia-natural/cash \
+  -H "Content-Type: application/json" \
+  -d '{ "businessDate": "2026-09-07", "baseAmount": 10000, "actorId": "admin-1" }' \
+  | grep -o '"cashRegisterId":"[^"]*"' | cut -d'"' -f4)
+
+curl -s -X POST http://localhost:8080/api/tenants/travesia-natural/cash/${CASH_ID}/movements \
+  -H "Content-Type: application/json" \
+  -d '{ "type": "INGRESO", "amount": 1000, "concept": "m1", "actorId": "admin-1" }'
+
+curl -s -X POST http://localhost:8080/api/tenants/travesia-natural/cash/${CASH_ID}/movements \
+  -H "Content-Type: application/json" \
+  -d '{ "type": "PAGO", "amount": 200, "concept": "m2", "actorId": "admin-1" }'
+
+curl -s "http://localhost:8080/api/tenants/travesia-natural/cash?businessDate=2026-09-07"
+```
+
+Cada respuesta debe traer los movimientos anteriores intactos (mismo `recordedAt`, sin
+duplicarse) más el nuevo agregado al final. La consulta final debe traer los 2
+movimientos, en el mismo orden en que se registraron.
+
+## 2. Caja: cerrar y corregir no tocan los movimientos ya guardados
+
+```bash
+curl -i -X POST http://localhost:8080/api/tenants/travesia-natural/cash/${CASH_ID}/close \
+  -H "Content-Type: application/json" -d '{ "actorId": "admin-1" }'
+
+curl -i -X POST http://localhost:8080/api/tenants/travesia-natural/cash/${CASH_ID}/corrections \
+  -H "Content-Type: application/json" \
+  -d '{ "justification": "ajuste", "actorId": "admin-1" }'
+```
+
+Ambas respuestas deben seguir trayendo los 2 movimientos originales sin cambios, más
+(en el segundo caso) la corrección agregada.
+
+## 3. Reserva: pagos y cancelación no afectan `reservedServices`
+
+Sobre una reserva `Pendiente de pago` con un solo servicio reservado:
+
+```bash
+curl -s -X POST http://localhost:8080/api/tenants/travesia-natural/reservations/${RES_ID}/payments \
+  -H "Content-Type: application/json" \
+  -d '{ "amount": 100000, "method": "ABONO", "actorId": "admin-1" }'
+
+curl -s -X POST http://localhost:8080/api/tenants/travesia-natural/reservations/${RES_ID}/cancel \
+  -H "Content-Type: application/json" \
+  -d '{ "reason": "prueba", "actorId": "admin-1" }'
+
+curl -s http://localhost:8080/api/tenants/travesia-natural/reservations/${RES_ID}
+```
+
+`reservedServices` debe seguir con el mismo único elemento en las tres respuestas
+(mismo `serviceReference`/`partySize`/`scheduledDate`), mientras `pendingBalance`,
+`paymentStatus`, `reservationStatus`, `cancelledAt`, etc. sí reflejan cada cambio.
+
+## 4. Histórico e informes siguen leyendo correctamente
+
+```bash
+curl -s http://localhost:8080/api/tenants/travesia-natural/cash/history
+curl -s "http://localhost:8080/api/tenants/travesia-natural/cash/consolidation?period=2026-09"
+```
+
+Ambos deben seguir devolviendo `200 OK` con los datos agregados de todas las cajas
+cerradas del tenant, movimientos en orden, sin errores de mapeo.
+
+## 5. Compilación y tests (spec 001 a spec 013, tras la corrección de persistencia)
+
+```bash
+./mvnw test
+```
+
+Deben seguir en verde `contextLoads` y los tests existentes, sin regresiones.
+
+# Plan de verificación — NPE en movimientos sin `type` + doble consulta en consolidación
+
+Dos hallazgos de `/code-review` sobre spec 013, pendientes desde la corrección de
+persistencia:
+
+1. `CashController.registerMovement` llamaba `CashMovementType.valueOf(request.type())`
+   directamente sobre el valor crudo del DTO. Si `type` venía ausente o `null` en el
+   JSON, `Enum.valueOf(_, null)` lanza `NullPointerException` (no
+   `IllegalArgumentException`), sin `@ExceptionHandler` que la capture: la API devolvía
+   `500` en vez del `400` documentado en la spec. `CashMovement` ya validaba
+   `type == null` correctamente en su constructor compacto — el problema era que nunca
+   llegaba a ejecutarse. Corregido dejando pasar `null` a `RegisterCashMovementCommand`
+   en vez de invocar `valueOf` sobre un valor nulo, para que la validación de dominio
+   (única fuente de verdad) haga su trabajo.
+2. `MonthlyCashConsolidationService.getMonthlyConsolidation()` consultaba
+   `reservationRepositoryPort.findAllByTenantId(tenantId)` dos veces en la misma
+   petición: una directa (cancelaciones) y otra dentro de
+   `RefundsTotalCalculator.totalForPeriod` (devoluciones). Corregido consultando una
+   sola vez y reutilizando la misma lista para ambos cálculos;
+   `RefundsTotalCalculator.totalForPeriod` ahora recibe la lista ya cargada en vez de
+   `tenantId` (único llamador, sin otros call sites afectados).
+
+## 1. Movimiento sin `type` devuelve 400, no 500
+
+```bash
+CASH_ID=$(curl -s -X POST http://localhost:8080/api/tenants/travesia-natural/cash \
+  -H "Content-Type: application/json" \
+  -d '{ "businessDate": "2026-09-09", "baseAmount": 5000, "actorId": "admin-1" }' \
+  | grep -o '"cashRegisterId":"[^"]*"' | cut -d'"' -f4)
+
+curl -i -X POST http://localhost:8080/api/tenants/travesia-natural/cash/${CASH_ID}/movements \
+  -H "Content-Type: application/json" \
+  -d '{ "amount": 1000, "concept": "sin tipo", "actorId": "admin-1" }'
+
+curl -i -X POST http://localhost:8080/api/tenants/travesia-natural/cash/${CASH_ID}/movements \
+  -H "Content-Type: application/json" \
+  -d '{ "type": null, "amount": 1000, "concept": "tipo null", "actorId": "admin-1" }'
+```
+
+Ambas deben devolver `400` con `{"error":"validation_error","message":"Unknown
+CashMovementType label: null"}` — mensaje actualizado tras el cambio a `fromLabel()`
+(ver sección más abajo, "Alineación de `CashMovementType` con el contrato del
+Frontend"). Un `type` inexistente (ej. `"FOO"`) debe seguir devolviendo `400` con el
+mismo tipo de mensaje (`"Unknown CashMovementType label: FOO"`).
+
+## 2. Consolidación mensual sigue devolviendo los mismos valores
+
+```bash
+curl -s "http://localhost:8080/api/tenants/travesia-natural/cash/consolidation?period=2026-09"
+```
+
+Debe seguir devolviendo `200 OK` con los mismos campos y valores que antes del cambio
+(`ingresos`, `pagosOperacionales`, `gastos`, `devoluciones`, `total`, `cancelaciones`,
+`costosOperacionales`) — la única diferencia es una consulta menos a `reservations` por
+petición.
+
+## 3. Compilación y tests
+
+```bash
+./mvnw test
+```
+
+Deben seguir en verde `contextLoads` y los tests existentes, sin regresiones.
+
+# Plan de verificación — Alineación de `CashMovementType` con el contrato del Frontend
+
+Hallazgo de `/code-review`: el enum `CashMovementType` (`INGRESO`/`PAGO`/`GASTO`) no
+coincidía con los literales que ya usa `operator-cash.service.ts` en la rama `develop`
+del Frontend (`'Ingreso'`/`'Pago operacional'`/`'Gasto'`/`'Devolución'`, sin integración
+HTTP todavía — trabajo de Fernanda Robayo, ver regla 11 de CLAUDE.md, solo lectura).
+Decisión: hasta que Backend y Frontend completen su implementación por separado, no debe
+haber ningún llamado HTTP real entre ambos; mientras tanto, se alinea el Backend al
+contrato ya definido en el Frontend para evitar el desfase cuando llegue la integración.
+
+Se aplicó el mismo patrón `label()`/`fromLabel()` que ya usan `ReservationStatus` y
+`PaymentStatus`: el enum interno de Java conserva sus constantes (`INGRESO`, `PAGO`,
+`GASTO`), pero expone/acepta el literal en español como valor de intercambio (JSON y
+columna `type` en `cash_movements`). No se agrega `DEVOLUCION`: sigue sin registrarse a
+mano, se calcula en vivo desde las devoluciones ejecutadas (spec 012), igual que antes.
+No se tocó ningún archivo del Frontend.
+
+Efecto colateral: las filas de prueba de esta sesión en la base de desarrollo
+(`cash_movements.type` en formato `INGRESO`/`PAGO`/`GASTO`) se migraron a mano a
+`Ingreso`/`Pago operacional`/`Gasto` vía `UPDATE` directo (dato sintético de pruebas
+propias, no hay entorno productivo ni datos de terceros afectados).
+
+## 1. Movimiento con el literal del Frontend es aceptado
+
+```bash
+CASH_ID=$(curl -s -X POST http://localhost:8080/api/tenants/travesia-natural/cash \
+  -H "Content-Type: application/json" \
+  -d '{ "businessDate": "2026-09-11", "baseAmount": 5000, "actorId": "admin-1" }' \
+  | grep -o '"cashRegisterId":"[^"]*"' | cut -d'"' -f4)
+
+curl -i -X POST http://localhost:8080/api/tenants/travesia-natural/cash/${CASH_ID}/movements \
+  -H "Content-Type: application/json" \
+  -d '{ "type": "Ingreso", "amount": 1000, "concept": "prueba", "actorId": "admin-1" }'
+
+curl -i -X POST http://localhost:8080/api/tenants/travesia-natural/cash/${CASH_ID}/movements \
+  -H "Content-Type: application/json" \
+  -d '{ "type": "Pago operacional", "amount": 200, "concept": "prueba", "actorId": "admin-1" }'
+
+curl -s "http://localhost:8080/api/tenants/travesia-natural/cash?businessDate=2026-09-11"
+```
+
+Ambos `POST` devuelven `201`. La consulta final debe mostrar `movements[].type` como
+`"Ingreso"` y `"Pago operacional"` (no `"INGRESO"`/`"PAGO"`).
+
+## 2. El formato viejo (nombre del enum de Java) ya no es válido
+
+```bash
+curl -i -X POST http://localhost:8080/api/tenants/travesia-natural/cash/${CASH_ID}/movements \
+  -H "Content-Type: application/json" \
+  -d '{ "type": "INGRESO", "amount": 100, "concept": "formato viejo", "actorId": "admin-1" }'
+```
+
+Debe devolver `400` (`"Unknown CashMovementType label: INGRESO"`) — señal de que ya no
+conviven dos formatos distintos para el mismo dato.
+
+## 3. Historial y consolidación siguen leyendo sin error tras la migración de datos
+
+```bash
+curl -s http://localhost:8080/api/tenants/travesia-natural/cash/history
+curl -s "http://localhost:8080/api/tenants/travesia-natural/cash/consolidation?period=2026-09"
+```
+
+Ambos deben seguir devolviendo `200 OK`, incluyendo las jornadas cerradas con
+movimientos migrados al nuevo formato.
+
+## 4. Compilación y tests
+
+```bash
+./mvnw test
+```
+
+Deben seguir en verde `contextLoads` y los tests existentes, sin regresiones.
+
+# Plan de verificación — Spec 014: Registro y consulta de colaboradores operativos
+
+Cierra una de las 20 brechas confirmadas en el análisis Backend-vs-PDR del 2026-09-04:
+`MembershipRole.OPERATIONAL_COLLABORATOR` existía en el enum desde spec 002 sin ningún
+caso de uso que lo asignara. El Frontend (rama `develop`, push de Fernanda Robayo del
+2026-09-03/04, ver regla 11 de CLAUDE.md, solo lectura) ya tiene pantallas reales
+(`collaborators`, `collaborators/new`, `collaborators/detail`) corriendo en simulación
+local. No hay integración HTTP real todavía (decisión vigente: sin llamadas HTTP entre
+Backend y Frontend hasta que ambos módulos estén completos); esta verificación es
+enteramente vía `curl` contra el Backend en aislamiento.
+
+Reutiliza el patrón ya existente de `Membership`/`RegisterCustomerService`/
+`CreateTenantService`: mismo `PasswordPolicy`, mismo `EmailAlreadyRegisteredException`,
+mismo `AuditRecorder`. El campo "nombre completo" del Frontend se guarda en
+`firstName` (`lastName` queda `null`, igual que en Administrator) — sin migración de
+esquema, la tabla `memberships` ya es genérica. El toggle "colaborador puede validar
+soportes de transferencia" (PDR línea 115) quedó fuera de esta spec a propósito (ver
+spec.md, "Fuera de alcance" y decisión abierta 2).
+
+## 1. Crear un tenant + Administrator de prueba
+
+```bash
+curl -s -X POST http://localhost:8080/api/tenants \
+  -H "Content-Type: application/json" \
+  -d '{ "tenantId": "spec014-collab-demo", "commercialName": "Spec 014 Demo",
+        "administrator": { "email": "admin@spec014.test", "password": "Admin123!",
+        "passwordConfirmation": "Admin123!" }, "actorId": "platform-admin" }'
+```
+
+Debe devolver `201` con `tenantStatus: "ACTIVO"`.
+
+## 2. Registrar un colaborador válido (`201`)
+
+```bash
+curl -i -X POST http://localhost:8080/api/tenants/spec014-collab-demo/collaborators \
+  -H "Content-Type: application/json" \
+  -d '{ "name": "Laura Perez", "email": "laura@spec014.test", "password": "Colab123!",
+        "passwordConfirmation": "Colab123!", "actorId": "admin@spec014.test" }'
+```
+
+Debe devolver `201` con `role: "OPERATIONAL_COLLABORATOR"`, `name: "Laura Perez"` y sin
+ningún campo de contraseña en la respuesta.
+
+## 3. Rechazo por correo duplicado en el mismo tenant (`409`)
+
+```bash
+curl -i -X POST http://localhost:8080/api/tenants/spec014-collab-demo/collaborators \
+  -H "Content-Type: application/json" \
+  -d '{ "name": "Otra Laura", "email": "laura@spec014.test", "password": "Colab123!",
+        "passwordConfirmation": "Colab123!", "actorId": "admin@spec014.test" }'
+```
+
+Debe devolver `409` (`"email_already_registered"`).
+
+## 4. Rechazo por política de contraseña incumplida (`400`)
+
+```bash
+curl -i -X POST http://localhost:8080/api/tenants/spec014-collab-demo/collaborators \
+  -H "Content-Type: application/json" \
+  -d '{ "name": "Otro Nombre", "email": "debil@spec014.test", "password": "123",
+        "passwordConfirmation": "123", "actorId": "admin@spec014.test" }'
+```
+
+Debe devolver `400` (`"validation_error"`, mensaje de `PasswordPolicy`).
+
+## 5. Listado y detalle del colaborador (`200`, sin `passwordHash`)
+
+```bash
+curl -s http://localhost:8080/api/tenants/spec014-collab-demo/collaborators
+
+MEMBERSHIP_ID="<el membershipId devuelto en el paso 2>"
+curl -s http://localhost:8080/api/tenants/spec014-collab-demo/collaborators/${MEMBERSHIP_ID}
+```
+
+El listado debe incluir a Laura con `name`/`email`/`role`. El detalle debe traer los
+mismos datos, sin ningún campo `passwordHash` en el JSON.
+
+## 6. Login del colaborador recién registrado (`200`, JWT con su rol)
+
+```bash
+curl -s -X POST http://localhost:8080/api/tenants/spec014-collab-demo/login \
+  -H "Content-Type: application/json" \
+  -d '{ "email": "laura@spec014.test", "password": "Colab123!" }'
+```
+
+Debe devolver `200` con `accessToken` y `role: "OPERATIONAL_COLLABORATOR"` — sin
+cambios en `LoginService`, ya era agnóstico al rol.
+
+## 7. Aislamiento entre tenants (`200` vacío, `404` cruzado)
+
+```bash
+curl -s -X POST http://localhost:8080/api/tenants \
+  -H "Content-Type: application/json" \
+  -d '{ "tenantId": "spec014-collab-demo-2", "commercialName": "Spec 014 Aislamiento",
+        "administrator": { "email": "admin2@spec014.test", "password": "Admin123!",
+        "passwordConfirmation": "Admin123!" }, "actorId": "platform-admin" }'
+
+curl -s http://localhost:8080/api/tenants/spec014-collab-demo-2/collaborators
+
+curl -i http://localhost:8080/api/tenants/spec014-collab-demo-2/collaborators/${MEMBERSHIP_ID}
+```
+
+El listado del segundo tenant debe venir vacío (`[]`). Consultar el detalle del
+colaborador del primer tenant desde el segundo debe devolver `404`
+(`"collaborator_not_found"`), no `200` con datos ajenos.
+
+## 8. Compilación y tests
+
+```bash
+./mvnw test
+```
+
+Deben seguir en verde `contextLoads` y los tests existentes, sin regresiones.
+
+Ejecutado el 2026-09-04 contra la base de desarrollo local (Postgres en `multitour-postgres`,
+tenants `spec014-collab-demo` y `spec014-collab-demo-2`, datos sintéticos de prueba, sin
+afectar tenants reales). `./mvnw test` en verde (`contextLoads`, 12 migraciones validadas)
+antes de levantar la app. Los 7 pasos de `curl` (registro, duplicado, password débil,
+listado, detalle sin `passwordHash`, login con `role: OPERATIONAL_COLLABORATOR`,
+aislamiento cruzado con `404 collaborator_not_found`) devolvieron los códigos HTTP y
+payloads exactos documentados arriba.
+
+## Spec 015 — Tipo de catálogo Transporte
+
+Agrega `TRANSPORT` a `CatalogItemType` y dos campos opcionales (`route`,
+`operationalCost`) a `CatalogItem`, reutilizando el CRUD-lite de spec 005 sin
+endpoints nuevos. Migración `V13__add_transport_fields_to_catalog_items.sql`.
+
+### 1. Compilación y tests
+
+```bash
+./mvnw test
+```
+
+Debe migrar a la versión 13 (`add transport fields to catalog items`) y mantener
+`contextLoads` en verde.
+
+### 2. Crear un tenant activo para las pruebas
+
+```bash
+curl -X POST http://localhost:8080/api/tenants \
+  -H "Content-Type: application/json" \
+  -d '{
+    "tenantId": "spec015-transport-demo",
+    "commercialName": "Spec015 Transport Demo",
+    "actorId": "system-test",
+    "administrator": {
+      "name": "Admin Spec015",
+      "email": "admin@spec015-transport-demo.test",
+      "password": "Passw0rd!123",
+      "passwordConfirmation": "Passw0rd!123"
+    }
+  }'
+```
+
+### 3. Crear TRANSPORT sin campos opcionales
+
+```bash
+curl -X POST http://localhost:8080/api/tenants/spec015-transport-demo/catalog-items \
+  -H "Content-Type: application/json" \
+  -d '{"type": "TRANSPORT", "name": "Ruta Neiva - San Agustin", "price": 45000}'
+```
+
+Debe devolver `201` con `capacity`, `route` y `operationalCost` en `null`.
+
+### 4. Round-trip de route/operationalCost
+
+Crear un ítem `TRANSPORT` con `route`/`operationalCost` y consultarlo por
+`GET /{itemId}`: ambos valores deben devolverse tal cual se guardaron.
+
+### 5. PATCH parcial
+
+`PATCH` solo `route` sobre el ítem anterior: el `GET` posterior debe conservar
+`operationalCost` y el resto de campos sin cambios.
+
+### 6. Regresión de capacity en LODGING
+
+```bash
+curl -X POST http://localhost:8080/api/tenants/spec015-transport-demo/catalog-items \
+  -H "Content-Type: application/json" \
+  -d '{"type": "LODGING", "name": "Cabana Rio Magdalena", "price": 150000}'
+```
+
+Debe seguir devolviendo `400 validation_error` ("capacity is required and must be
+positive for LODGING items") — TRANSPORT no debilita esa regla.
+
+### 7. Criterios ya cubiertos por spec 005, contra un ítem TRANSPORT
+
+- Tenant inexistente → `404 not_found`.
+- Segundo tenant: el ítem del primero no aparece en su lista y su `GET /{itemId}`
+  devuelve `404` (aislamiento).
+- `deactivate` → `200`, `active: false`; `deactivate` de nuevo → `400
+  validation_error` ("already inactive"); `reactivate` → `200`, `active: true`.
+- Tenant `Inactivo` → `POST` de un ítem `TRANSPORT` nuevo devuelve `409
+  tenant_inactive`.
+
+Ejecutado el 2026-09-04 contra la base de desarrollo local (mismo Postgres
+`multitour-postgres`, tenants `spec015-transport-demo` y
+`spec015-transport-demo-2`, datos sintéticos, sin afectar tenants reales).
+`./mvnw test` en verde (`contextLoads`, migración a versión 13 confirmada) antes de
+levantar la app. Los 7 pasos de `curl` de esta sección (creación sin opcionales,
+round-trip route/operationalCost, PATCH parcial, regresión LODGING, tenant
+inexistente, aislamiento entre tenants, soft delete/reactivate, tenant inactivo)
+devolvieron los códigos HTTP y payloads exactos documentados arriba.
+
+## Spec 016 — Aislamiento de reservas por Cliente
+
+Agrega `GET .../reservations/me` y `GET .../reservations/me/{reservationId}`,
+protegidos con JWT, que filtran por el `customerId` (`membershipId` del token) del
+llamante. No toca los endpoints públicos existentes `GET .../reservations` (Staff,
+sin filtrar) ni `GET .../reservations/{reservationId}`.
+
+### 1. Compilación y tests
+
+```bash
+./mvnw test
+```
+
+Debe mantener `contextLoads` en verde (no hay migración nueva en esta spec).
+
+### 2. Crear un tenant activo y dos End Customers distintos
+
+```bash
+curl -X POST http://localhost:8080/api/tenants \
+  -H "Content-Type: application/json" \
+  -d '{
+    "tenantId": "spec016-reservas-demo",
+    "commercialName": "Spec016 Reservas Demo",
+    "actorId": "system-test",
+    "administrator": {
+      "name": "Admin Spec016",
+      "email": "admin@spec016-reservas-demo.test",
+      "password": "Passw0rd!123",
+      "passwordConfirmation": "Passw0rd!123"
+    }
+  }'
+
+curl -X POST http://localhost:8080/api/tenants/spec016-reservas-demo/customers \
+  -H "Content-Type: application/json" \
+  -d '{"firstName":"Cliente","lastName":"A","email":"clientea@spec016.test","phone":"3000000001","password":"Passw0rd!123","passwordConfirmation":"Passw0rd!123"}'
+
+curl -X POST http://localhost:8080/api/tenants/spec016-reservas-demo/customers \
+  -H "Content-Type: application/json" \
+  -d '{"firstName":"Cliente","lastName":"B","email":"clienteb@spec016.test","phone":"3000000002","password":"Passw0rd!123","passwordConfirmation":"Passw0rd!123"}'
+```
+
+Login de cada uno (`POST .../login`) para obtener `TOKEN_A`/`TOKEN_B` con
+`membershipId` distinto.
+
+### 3. Cada Cliente crea su propia reserva
+
+```bash
+curl -X POST http://localhost:8080/api/tenants/spec016-reservas-demo/reservations \
+  -H "Content-Type: application/json" -H "Authorization: Bearer ${TOKEN_A}" \
+  -d '{"projectedValue": 150000, "reservedServices": [{"serviceReference": "tour-demo-1", "partySize": 2, "scheduledDate": "2026-10-01"}]}'
+
+curl -X POST http://localhost:8080/api/tenants/spec016-reservas-demo/reservations \
+  -H "Content-Type: application/json" -H "Authorization: Bearer ${TOKEN_B}" \
+  -d '{"projectedValue": 200000, "reservedServices": [{"serviceReference": "tour-demo-2", "partySize": 1, "scheduledDate": "2026-10-02"}]}'
+```
+
+Guardar `RES_A`/`RES_B` de cada respuesta.
+
+### 4. `GET .../reservations/me` filtra por Cliente
+
+```bash
+curl -s http://localhost:8080/api/tenants/spec016-reservas-demo/reservations/me \
+  -H "Authorization: Bearer ${TOKEN_A}"
+```
+
+Debe devolver únicamente `RES_A`, nunca `RES_B`.
+
+### 5. Lista vacía para un Cliente sin reservas
+
+Registrar y loguear un tercer Cliente (`clientec@spec016.test`, sin crear ninguna
+reserva) y repetir el paso 4 con su token: debe devolver `[]`.
+
+### 6. Sin token → `401`
+
+```bash
+curl -s -o /dev/null -w "%{http_code}\n" http://localhost:8080/api/tenants/spec016-reservas-demo/reservations/me
+```
+
+Debe devolver `401`.
+
+### 7. Detalle de la reserva ajena por `/me/{id}` → `404`
+
+```bash
+curl -s -o /dev/null -w "%{http_code}\n" http://localhost:8080/api/tenants/spec016-reservas-demo/reservations/me/${RES_B} \
+  -H "Authorization: Bearer ${TOKEN_A}"
+```
+
+Cliente A pidiendo la reserva de Cliente B debe devolver `404` (mismo patrón de
+404 unificado que spec 014, nunca revela que la reserva existe).
+
+### 8. Token de otro tenant → `403 tenant_mismatch`
+
+```bash
+curl -s -w "\nHTTP:%{http_code}\n" http://localhost:8080/api/tenants/otro-tenant-cualquiera/reservations/me \
+  -H "Authorization: Bearer ${TOKEN_A}"
+```
+
+Debe devolver `403` con `{"error":"tenant_mismatch", ...}`.
+
+### 9. Regresión: `GET .../reservations` (Staff, sin autenticación) sigue sin filtrar
+
+```bash
+curl -s http://localhost:8080/api/tenants/spec016-reservas-demo/reservations
+```
+
+Debe seguir devolviendo `200` con todas las reservas del tenant (`RES_A` y `RES_B`
+juntas), sin exigir token — confirma que el endpoint público existente no quedó
+afectado por esta spec.
+
+Ejecutado el 2026-09-05 contra la base de desarrollo local (mismo Postgres
+`multitour-postgres`, tenant `spec016-reservas-demo` con tres End Customers
+sintéticos, sin afectar tenants reales). `./mvnw test` en verde (`contextLoads`,
+sin migraciones nuevas) antes de levantar la app. Los 8 pasos de `curl` de esta
+sección (listado propio, lista vacía, 401 sin token, 404 sobre reserva ajena, 403
+tenant_mismatch, y la regresión del listado público sin filtrar) devolvieron los
+códigos HTTP y payloads exactos documentados arriba.
+
+## Spec 017 — Finalización de la ejecución de una reserva
+
+Corresponde a `specs/017-reservation-execution-finalization/`. Agrega
+`POST .../reservations/{reservationId}/finalize`, que cierra operativamente una
+reserva `En ejecucion` (transición a `Finalizada`) y extiende
+`GET .../reservations/{reservationId}/execution` con `finalized`/`finalizedBy`/
+`finalizedAt`. Requiere Postgres arriba, la app corriendo, el tenant
+`travesia-natural` `Activo`, y un token válido de `laura.gomez@example.com`
+(sección "007", pasos 1-2) para crear reservas nuevas.
+
+```bash
+TOKEN="<accessToken de la sección 007, paso 1>"
+```
+
+### 1. Compilación y tests
+
+```bash
+./mvnw test
+```
+
+Debe mantener `contextLoads` en verde, con la migración a versión 14 confirmada.
+
+### 2. Finalizar una reserva `En ejecucion` (`200`)
+
+Crear una reserva, pagarla en efectivo (igual que sección "009", paso 1) y
+registrar su ejecución (igual que sección "010", paso 1) para obtener `RES_Q` en
+estado `En ejecucion`:
+
+```bash
+curl -s -X POST http://localhost:8080/api/tenants/travesia-natural/reservations \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer ${TOKEN}" \
+  -d '{ "projectedValue": 300000, "reservedServices": [{ "serviceReference": "tour-laguna-verde" }] }'
+
+curl -i -X POST http://localhost:8080/api/tenants/travesia-natural/reservations/${RES_Q}/payments \
+  -H "Content-Type: application/json" \
+  -d '{ "method": "EFECTIVO", "amount": 300000 }'
+
+curl -i -X POST http://localhost:8080/api/tenants/travesia-natural/reservations/${RES_Q}/execution \
+  -H "Content-Type: application/json" \
+  -d '{ "served": true, "executed": 4, "actorId": "guia-1" }'
+```
+
+Y finalizarla:
+
+```bash
+curl -i -X POST http://localhost:8080/api/tenants/travesia-natural/reservations/${RES_Q}/finalize \
+  -H "Content-Type: application/json" \
+  -d '{ "actorId": "guia-1" }'
+```
+
+Se espera `200 OK` con `reservationStatus: "Finalizada"`, `finalizedBy: "guia-1"` y
+`finalizedAt` presente.
+
+### 3. Doble finalización (`409`)
+
+Repetir el mismo `curl` del paso 2 sobre `RES_Q` (ya finalizada):
+
+```bash
+curl -i -X POST http://localhost:8080/api/tenants/travesia-natural/reservations/${RES_Q}/finalize \
+  -H "Content-Type: application/json" \
+  -d '{ "actorId": "guia-1" }'
+```
+
+Se espera `409 Conflict` con `{"error":"reservation_not_finalizable", ...}`.
+
+### 4. Finalizar sobre un estado que no es `En ejecucion` (`409`)
+
+Crear `RES_R` sin ejecutarla (queda `Confirmada` tras pagarla, igual que
+sección "009", paso 1):
+
+```bash
+curl -i -X POST http://localhost:8080/api/tenants/travesia-natural/reservations/${RES_R}/finalize \
+  -H "Content-Type: application/json" \
+  -d '{ "actorId": "guia-1" }'
+```
+
+Se espera `409 Conflict` con `{"error":"reservation_not_finalizable", ...}`, y la
+reserva sigue `Confirmada` sin cambios.
+
+### 5. `GET .../execution` refleja la finalización (`200`)
+
+```bash
+curl -s http://localhost:8080/api/tenants/travesia-natural/reservations/${RES_Q}/execution
+```
+
+Se espera `200 OK` con `finalized: true`, `finalizedBy: "guia-1"` y `finalizedAt`
+presente, además de los campos ya existentes (`served`, `executed`, `causal`,
+`actorId`, `recordedAt`). Repetir sobre una reserva `En ejecucion` sin finalizar
+(ej. `RES_G` de la sección "010" si sigue disponible): se espera `finalized: false`,
+`finalizedBy: null`, `finalizedAt: null`.
+
+### 6. Tenant inexistente (`404`) y tenant `Inactivo` (`409`)
+
+```bash
+curl -i -X POST http://localhost:8080/api/tenants/no-existe/reservations/${RES_Q}/finalize \
+  -H "Content-Type: application/json" \
+  -d '{ "actorId": "guia-1" }'
+```
+
+Se espera `404 Not Found` con `{"error":"not_found", ...}`. Desactivar el tenant
+(sección "002") y repetir la finalización: se espera `409 Conflict` con
+`{"error":"tenant_inactive", ...}`.
+
+Ejecutado el 2026-09-05 contra la base de desarrollo local (mismo Postgres
+`multitour-postgres`, tenant `travesia-natural`, cliente `laura.gomez@example.com`
+existente). `./mvnw test` en verde (`contextLoads`, migración a versión 14
+confirmada) antes de levantar la app. Los 6 pasos de `curl` de esta sección
+(finalización exitosa con `finalizedBy`/`finalizedAt`, doble finalización `409`,
+finalización sobre `Confirmada` `409`, `GET .../execution` reflejando
+`finalized`/`finalizedBy`/`finalizedAt`, tenant inexistente `404` y tenant
+`Inactivo` `409`, reactivando el tenant al final para no dejar el ambiente
+alterado) devolvieron los códigos HTTP y payloads exactos documentados arriba. El
+tercer criterio de aceptación de `spec.md` (finalizar sin `Execution` registrada)
+no se probó en runtime: no existe forma de llegar a ese estado por el flujo
+normal, por la garantía de atomicidad documentada en `plan.md`.
+
+## 018 — Acompañantes individualizados en la reserva
+
+Corresponde a `specs/018-reservation-companions/`. Agrega `holderDocument` y
+`companions` (nombre, documento, fecha de nacimiento) a la creación de reservas
+(mismo endpoint `POST .../reservations` de spec 001), con la invariante RN-RES-005
+(sin documentos repetidos dentro de la misma reserva) y su reflejo en `GET`. Requiere
+Postgres arriba, la app corriendo, el tenant `travesia-natural` `Activo`, y un token
+válido de `laura.gomez@example.com` (sección "007", pasos 1-2).
+
+```bash
+TOKEN="<accessToken de la sección 007, paso 1>"
+```
+
+### 1. Compilación y tests
+
+```bash
+./mvnw test
+```
+
+Debe mantener `contextLoads` en verde, con la migración a versión 15 confirmada
+(tabla `reservation_companions` y columna `holder_document` en `reservations`).
+
+### 2. Crear una reserva con `holderDocument` y `companions` sin duplicados (`201`)
+
+```bash
+curl -s -X POST http://localhost:8080/api/tenants/travesia-natural/reservations \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer ${TOKEN}" \
+  -d '{
+        "projectedValue": 300000,
+        "reservedServices": [
+          { "serviceReference": "tour-laguna-verde", "partySize": 3, "scheduledDate": "2026-10-20" }
+        ],
+        "holderDocument": "1001-234567",
+        "companions": [
+          { "name": "Ana Torres", "document": "1002345678", "birthDate": "1998-05-12" },
+          { "name": "Luis Torres", "document": "1003456789", "birthDate": "2015-03-01" }
+        ]
+      }'
+```
+
+Se espera `201 Created` con `holderDocument: "1001-234567"` y `companions` con los
+dos registros completos (`name`, `document`, `birthDate`). Guardar el
+`reservationId` devuelto como `RES_S`.
+
+### 3. Crear una reserva sin `holderDocument` ni `companions` (`201`, compatibilidad)
+
+```bash
+curl -i -X POST http://localhost:8080/api/tenants/travesia-natural/reservations \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer ${TOKEN}" \
+  -d '{ "projectedValue": 150000, "reservedServices": [{ "serviceReference": "tour-laguna-verde", "partySize": 1, "scheduledDate": "2026-10-21" }] }'
+```
+
+Se espera `201 Created`, igual que antes de esta spec, con `holderDocument: null` y
+`companions: []`.
+
+### 4. Documento de un acompañante igual al `holderDocument` (`400`, RN-RES-005)
+
+```bash
+curl -i -X POST http://localhost:8080/api/tenants/travesia-natural/reservations \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer ${TOKEN}" \
+  -d '{
+        "projectedValue": 150000,
+        "reservedServices": [{ "serviceReference": "tour-laguna-verde", "partySize": 2, "scheduledDate": "2026-10-22" }],
+        "holderDocument": "1001-234567",
+        "companions": [{ "name": "Duplicado Titular", "document": "1001234567", "birthDate": "1990-01-01" }]
+      }'
+```
+
+Se espera `400 Bad Request` con `{"error":"validation_error", ...}` — nótese que
+`"1001-234567"` y `"1001234567"` se normalizan al mismo valor (trim, minúsculas,
+solo alfanumérico) y cuentan como el mismo documento. No debe quedar reserva creada.
+
+### 5. Dos acompañantes con el mismo documento (`400`, RN-RES-005)
+
+```bash
+curl -i -X POST http://localhost:8080/api/tenants/travesia-natural/reservations \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer ${TOKEN}" \
+  -d '{
+        "projectedValue": 150000,
+        "reservedServices": [{ "serviceReference": "tour-laguna-verde", "partySize": 2, "scheduledDate": "2026-10-22" }],
+        "companions": [
+          { "name": "Acompanante Uno", "document": "9998887777", "birthDate": "1990-01-01" },
+          { "name": "Acompanante Dos", "document": "9998887777", "birthDate": "1991-02-02" }
+        ]
+      }'
+```
+
+Se espera `400 Bad Request` con `{"error":"validation_error", ...}`. No debe quedar
+reserva creada.
+
+### 6. `GET` de la reserva refleja `holderDocument` y `companions` (`200`)
+
+```bash
+curl -s http://localhost:8080/api/tenants/travesia-natural/reservations/${RES_S}
+```
+
+Se espera `200 OK` con `holderDocument` y `companions` idénticos a los enviados en
+el paso 2. Repetir con el listado (`GET .../reservations`) y confirmar que `RES_S`
+aparece con los mismos datos.
+
+Ejecutado el 2026-09-05 contra la base de desarrollo local (mismo Postgres
+`multitour-postgres`, tenant `travesia-natural`, cliente `laura.gomez@example.com`
+existente). La migración V15 requirió una corrección: la primera versión creaba
+`reservation_companions.tenant_id` como `UUID`, inconsistente con el `VARCHAR(50)`
+que `tenant_id` usa en el resto del esquema desde `V5` — Hibernate lo detectó como
+`SchemaManagementException` al validar el esquema en `./mvnw test`. Se corrigió la
+migración a `VARCHAR(50) REFERENCES tenants(tenant_id)` y se revirtió manualmente el
+estado ya aplicado en la base de desarrollo local (sin datos de producción
+afectados) antes de reaplicarla. `./mvnw test` en verde (`contextLoads`, migración a
+versión 15 confirmada) antes de levantar la app. Los 5 pasos de `curl` de esta
+sección (creación con acompañantes válidos, creación sin campos opcionales, rechazo
+por documento duplicado con el titular, rechazo por documento duplicado entre
+acompañantes, y `GET`/listado reflejando los datos guardados) devolvieron los
+códigos HTTP y payloads exactos documentados arriba.
+
+## 019 — Ciclo de vida de la solicitud de devolución (Refund)
+
+Corresponde a `specs/019-refund-request-lifecycle/`. Agrega el estado
+`refundDecisionStatus` (RN-RES-008) a `Reservation`:
+`PENDIENTE_AUTORIZACION → AUTORIZADA/RECHAZADA → EJECUTADA/SALDO_A_FAVOR_REGISTRADO`,
+con tres endpoints nuevos bajo `POST .../reservations/{reservationId}/refund/...`
+(`authorize`, `reject`, `credit-balance`) que solo un `Membership` `ADMINISTRATOR`
+del tenant puede invocar (`actorId` = `membershipId`). Requiere Postgres arriba
+(migración V16, columna `refund_decision_status` y afines) y la app corriendo.
+
+Se creó un tenant de prueba dedicado `spec019-refund-demo` (con su Administrator,
+un colaborador `OPERATIONAL_COLLABORATOR` y un `END_CUSTOMER`) para no interferir
+con los datos de `travesia-natural`.
+
+### 1. Cancelar una reserva pagada deja `refundDecisionStatus: Pendiente de autorizacion`
+
+Reserva creada vía `POST .../reservations` (con token JWT del `END_CUSTOMER`),
+pagada por completo en efectivo (`POST .../payments`) y cancelada
+(`POST .../{reservationId}/cancel`, `actorId` = membershipId del Administrator).
+El `GET` de la reserva confirma `refundDecisionStatus: "Pendiente de autorizacion"`,
+`creditBalance` igual al monto pagado y `paymentStatus: "Saldo a favor pendiente"`.
+
+### 2. Ejecutar el refund sin autorizar (`409`)
+
+```bash
+curl -i -X POST http://localhost:8080/api/tenants/spec019-refund-demo/reservations/{reservationId}/refund \
+  -H "Content-Type: application/json" \
+  -d '{ "amount": 300000, "reason": "Devolucion por cancelacion", "actorId": "<membershipId admin>", "method": "EFECTIVO" }'
+```
+
+Se espera `409 Conflict` con `{"error":"refund_not_authorized", "message":"cannot execute refund, current refundDecisionStatus: Pendiente de autorizacion..."}`.
+
+### 3. Autorizar con un `actorId` `OPERATIONAL_COLLABORATOR` (`403`)
+
+```bash
+curl -i -X POST http://localhost:8080/api/tenants/spec019-refund-demo/reservations/{reservationId}/refund/authorize \
+  -H "Content-Type: application/json" \
+  -d '{ "actorId": "<membershipId colaborador>", "note": "Autorizo devolucion" }'
+```
+
+Se espera `403 Forbidden` con `{"error":"refund_action_not_allowed", "message":"only an ADMINISTRATOR can decide on a refund request, actor role: OPERATIONAL_COLLABORATOR"}`.
+
+### 4. Autorizar con un `actorId` `ADMINISTRATOR` (`200`, `Autorizada`)
+
+```bash
+curl -i -X POST http://localhost:8080/api/tenants/spec019-refund-demo/reservations/{reservationId}/refund/authorize \
+  -H "Content-Type: application/json" \
+  -d '{ "actorId": "<membershipId admin>", "note": "Autorizo devolucion en efectivo" }'
+```
+
+Se espera `200 OK` con `refundDecisionStatus: "Autorizada"`, `refundAuthorizedBy`
+igual al `actorId` y `refundAuthorizedAt`/`refundAuthorizationNote` con los valores
+enviados. Reintentar la autorización sobre la misma reserva ya `Autorizada` devuelve
+`409 refund_not_authorized` (idempotencia confirmada).
+
+### 5. Ejecutar el refund ya autorizado (`200`, `Ejecutada`)
+
+```bash
+curl -i -X POST http://localhost:8080/api/tenants/spec019-refund-demo/reservations/{reservationId}/refund \
+  -H "Content-Type: application/json" \
+  -d '{ "amount": 300000, "reason": "Devolucion por cancelacion", "actorId": "<membershipId admin>", "method": "EFECTIVO" }'
+```
+
+Se espera `200 OK` con `refundDecisionStatus: "Ejecutada"`, `refundedAmount: 300000`,
+`refundReason`, `refundMethod` y `refundedAt` con los valores enviados/generados, y
+`paymentStatus: "Devuelto parcial o total"`.
+
+### 6. Repetir 1-4 y registrar el refund como saldo a favor (`200`, `Saldo a favor pendiente`)
+
+Con una segunda reserva (creada, pagada, cancelada y autorizada igual que en los
+pasos 1 y 4):
+
+```bash
+curl -i -X POST http://localhost:8080/api/tenants/spec019-refund-demo/reservations/{reservationId}/refund/credit-balance \
+  -H "Content-Type: application/json" \
+  -d '{ "actorId": "<membershipId admin>" }'
+```
+
+Se espera `200 OK` con `refundDecisionStatus: "Saldo a favor pendiente"` (label de
+`SALDO_A_FAVOR_REGISTRADO`), sin tocar `paymentStatus` ni `creditBalance` (quedan
+igual que tras la cancelación).
+
+### 7. Repetir el paso 1 y rechazar en vez de autorizar (`200`, `Rechazada`) — luego `409` al ejecutar
+
+Con una tercera reserva (creada, pagada y cancelada igual que en el paso 1):
+
+```bash
+curl -i -X POST http://localhost:8080/api/tenants/spec019-refund-demo/reservations/{reservationId}/refund/reject \
+  -H "Content-Type: application/json" \
+  -d '{ "actorId": "<membershipId admin>", "reason": "Motivo de cancelacion no cumple politica de devolucion" }'
+```
+
+Se espera `200 OK` con `refundDecisionStatus: "Rechazada"`, `refundRejectedBy`,
+`refundRejectedAt` y `refundRejectionReason` con los valores enviados, sin tocar
+`paymentStatus`/`creditBalance`. Intentar ejecutar el refund después
+(`POST .../refund`) sobre esa misma reserva devuelve `409 Conflict` con
+`{"error":"refund_not_authorized", "message":"cannot execute refund, current refundDecisionStatus: Rechazada..."}`.
+
+Ejecutado el 2026-09-05 contra la base de desarrollo local (mismo Postgres
+`multitour-postgres`, migración V16 aplicada, tenant de prueba
+`spec019-refund-demo` con Administrator, colaborador y End Customer creados para la
+ocasión). Los 7 pasos anteriores devolvieron los códigos HTTP y payloads exactos
+documentados arriba, incluyendo la validación adicional de idempotencia del paso 4
+(reintentar `authorize` sobre una reserva ya `Autorizada` devuelve `409`).
+
+## 020 — Permiso de Colaborador para validar soportes de transferencia
+
+Corresponde a `specs/020-collaborator-support-validation-permission/`. Agrega el
+campo `allowCollaboratorSupportValidation` (boolean, `false` por defecto) a
+`Tenant`, con un endpoint `PATCH /api/tenants/{tenantId}/collaborator-support-permission`
+que solo un `Membership` `ADMINISTRATOR` puede invocar. `DecidePaymentSupportService`
+(`POST .../reservations/{reservationId}/payments/decide-support`) ahora resuelve el
+`Membership` del `actorId` recibido y aplica RN del PDR línea 115: `ADMINISTRATOR`
+siempre puede decidir; `OPERATIONAL_COLLABORATOR` solo si el tenant tiene el flag
+habilitado. Requiere Postgres arriba (migración V17, columna
+`allow_collaborator_support_validation`) y la app corriendo.
+
+Se creó un tenant de prueba dedicado `spec020-demo` (con su Administrator, un
+colaborador `OPERATIONAL_COLLABORATOR` y un `END_CUSTOMER`) para no interferir con
+los datos de `travesia-natural` ni de `spec019-refund-demo`.
+
+### 1. Crear el tenant y el colaborador (permiso `false` por defecto)
+
+```bash
+curl -s -X POST http://localhost:8080/api/tenants \
+  -H "Content-Type: application/json" \
+  -d '{ "tenantId": "spec020-demo", "commercialName": "Spec020 Demo",
+        "administrator": {"email": "admin020@example.com", "password": "Passw0rd!", "passwordConfirmation": "Passw0rd!"},
+        "actorId": "system" }'
+
+curl -s -X POST http://localhost:8080/api/tenants/spec020-demo/collaborators \
+  -H "Content-Type: application/json" \
+  -d '{ "name": "Colaborador Operativo", "email": "colab020@example.com", "password": "Passw0rd!", "passwordConfirmation": "Passw0rd!", "actorId": "<membershipId admin>" }'
+```
+
+El `GET /api/tenants/spec020-demo` confirma `allowCollaboratorSupportValidation: false`.
+
+### 2. Con una reserva en validación de soporte, decidir con el `actorId` del colaborador (`403`)
+
+Reserva creada vía `POST .../reservations` (token JWT del `END_CUSTOMER`) y pagada
+con `POST .../payments` usando `method: "TRANSFERENCIA"`, lo que deja
+`paymentStatus: "En validacion"`.
+
+```bash
+curl -i -X POST http://localhost:8080/api/tenants/spec020-demo/reservations/{reservationId}/payments/decide-support \
+  -H "Content-Type: application/json" \
+  -d '{ "decision": "APPROVE", "reason": "Comprobante verificado", "actorId": "<membershipId colaborador>" }'
+```
+
+Se espera `403 Forbidden` con `{"error":"support_validation_not_allowed", "message":"actor role OPERATIONAL_COLLABORATOR is not allowed to decide a payment support for tenant spec020-demo"}`.
+
+### 3. Activar el permiso con un `actorId` `ADMINISTRATOR` (`200`)
+
+```bash
+curl -i -X PATCH http://localhost:8080/api/tenants/spec020-demo/collaborator-support-permission \
+  -H "Content-Type: application/json" \
+  -d '{ "actorId": "<membershipId admin>", "allow": true }'
+```
+
+Se espera `200 OK` con `allowCollaboratorSupportValidation: true` en la respuesta.
+
+### 4. Repetir el paso 2 (`200`, decisión aplicada)
+
+Mismo `curl` del paso 2, ahora con el permiso habilitado. Se espera `200 OK` con
+`reservationStatus: "Confirmada"` y `paymentStatus: "Pagado"`.
+
+### 5. Intentar activar el permiso con el `actorId` del colaborador (`403`)
+
+```bash
+curl -i -X PATCH http://localhost:8080/api/tenants/spec020-demo/collaborator-support-permission \
+  -H "Content-Type: application/json" \
+  -d '{ "actorId": "<membershipId colaborador>", "allow": false }'
+```
+
+Se espera `403 Forbidden` con `{"error":"tenant_permission_not_allowed", "message":"only an ADMINISTRATOR can change the collaborator support validation permission, actor role: OPERATIONAL_COLLABORATOR"}`.
+
+### 6. Decidir con un `actorId` `ADMINISTRATOR` en cualquier momento (siempre `200`)
+
+Con el permiso desactivado de nuevo (`allow: false` desde el Administrator) y una
+segunda reserva en validación de soporte:
+
+```bash
+curl -i -X POST http://localhost:8080/api/tenants/spec020-demo/reservations/{reservationId}/payments/decide-support \
+  -H "Content-Type: application/json" \
+  -d '{ "decision": "APPROVE", "reason": "Comprobante verificado por admin", "actorId": "<membershipId admin>" }'
+```
+
+Se espera `200 OK` sin importar el valor del flag, porque `ADMINISTRATOR` siempre
+puede decidir.
+
+### Bonus: `actorId` desconocido al cambiar el permiso (`403`)
+
+```bash
+curl -i -X PATCH http://localhost:8080/api/tenants/spec020-demo/collaborator-support-permission \
+  -H "Content-Type: application/json" \
+  -d '{ "actorId": "00000000-0000-0000-0000-000000000000", "allow": true }'
+```
+
+Se espera `403 Forbidden` con `{"error":"tenant_permission_not_allowed", "message":"membership not found for actorId: 00000000-0000-0000-0000-000000000000 in tenant spec020-demo"}`.
+
+### Bonus: `actorId` ausente (`null`) no debe devolver `500`
+
+Hallazgo de `/code-review`: `UUID.fromString(null)` lanza `NullPointerException`, no
+`IllegalArgumentException`, y el `catch` original solo capturaba esta última —
+un `actorId` ausente en el body terminaba en `500` sin mapear en vez del `403`
+esperado. Se corrigió con un chequeo explícito de `null` antes del parseo, en
+`DecidePaymentSupportService` y `UpdateCollaboratorSupportValidationPermissionService`.
+
+```bash
+curl -i -X POST http://localhost:8080/api/tenants/spec020-demo/reservations/{reservationId}/payments/decide-support \
+  -H "Content-Type: application/json" \
+  -d '{ "decision": "APPROVE", "reason": "test null actor" }'
+
+curl -i -X PATCH http://localhost:8080/api/tenants/spec020-demo/collaborator-support-permission \
+  -H "Content-Type: application/json" \
+  -d '{ "allow": true }'
+```
+
+Ambos devuelven `403 Forbidden` (`support_validation_not_allowed` /
+`tenant_permission_not_allowed`) con `"actorId must be a valid membershipId: null"`.
+
+### Bonus: cambiar el permiso sobre un tenant `Inactivo` (`409`, no `400`)
+
+Hallazgo de `/code-review`: `UpdateCollaboratorSupportValidationPermissionService`
+no verificaba `tenant.tenantStatus()` antes de mutar, así que un tenant `Inactivo`
+devolvía `400 validation_error` (por `InvalidTenantException` del dominio) en vez
+de `409 tenant_inactive`, rompiendo la convención del resto del módulo `tenants`
+(ver `RegisterCollaboratorService`). Se corrigió agregando el chequeo explícito en
+el servicio y su `@ExceptionHandler` correspondiente en `TenantController`.
+
+```bash
+curl -i -X POST http://localhost:8080/api/tenants/spec020-demo/deactivate \
+  -H "Content-Type: application/json" \
+  -d '{ "reason": "prueba desactivacion", "actorId": "<membershipId admin>" }'
+
+curl -i -X PATCH http://localhost:8080/api/tenants/spec020-demo/collaborator-support-permission \
+  -H "Content-Type: application/json" \
+  -d '{ "actorId": "<membershipId admin>", "allow": true }'
+```
+
+Se espera `409 Conflict` con `{"error":"tenant_inactive", "message":"tenant is Inactivo: spec020-demo"}`.
+Reactivado el tenant al final de la prueba (`POST .../reactivate`) para dejarlo en
+estado limpio.
+
+### Deuda conocida (no corregida en esta spec)
+
+`/code-review` encontró que ni `DecidePaymentSupportService` ni
+`UpdateCollaboratorSupportValidationPermissionService` (ni el `RefundActorValidator`
+preexistente de spec 019) verifican `membershipStatus`: un `Membership` desactivado
+conserva su `membershipId` y puede seguir actuando en estos tres casos de uso, ya
+que no pasan por `LoginService`/JWT. Corregirlo tocaría también código ya pusheado
+de spec 019 y no es un criterio de aceptación de la spec 020 — queda documentado
+como deuda compartida, pendiente de decisión (spec propia o fix puntual).
+
+Ejecutado el 2026-09-05 contra la base de desarrollo local (mismo Postgres
+`multitour-postgres`, migración V17 aplicada, tenant de prueba `spec020-demo` con
+Administrator, colaborador y End Customer creados para la ocasión). Los 6 pasos del
+plan y la verificación adicional de `actorId` desconocido devolvieron los códigos
+HTTP y payloads exactos documentados arriba.
+
+## 021 — Completar campos de trazabilidad de `AuditRecord`
+
+Corresponde a `specs/021-audit-record-traceability-fields/`. Agrega a `AuditRecord`
+los campos `previousValue`, `newValue`, `channelOrModule` y
+`functionalProcessReference` (todos opcionales), ya confirmados en
+`06-data/models.md` pero ausentes en el Backend hasta ahora. `DeactivateTenantService`
+y `ReactivateTenantService` se actualizan como caso de uso de ejemplo para llenarlos
+con valores reales. Requiere Postgres arriba (migración V18, columnas nuevas en
+`audit_records`) y la app corriendo.
+
+### 1. Los registros de auditoría previos se siguen leyendo sin error
+
+```bash
+curl -s http://localhost:8080/api/audit
+```
+
+Se espera `200 OK` con la lista completa (52 registros preexistentes al momento de
+la verificación), cada uno con `previousValue`, `newValue`, `channelOrModule` y
+`functionalProcessReference` presentes como claves y en `null`.
+
+### 2. Desactivar un tenant activo registra `previousValue`/`newValue` reales
+
+```bash
+curl -s -X POST http://localhost:8080/api/tenants/spec020-demo/deactivate \
+  -H "Content-Type: application/json" \
+  -d '{ "reason": "prueba spec 021", "actorId": "<membershipId admin>" }'
+
+curl -s http://localhost:8080/api/audit
+```
+
+Se espera que el registro más nuevo (`action: "TENANT_DEACTIVATED"`) traiga
+`previousValue: "Activo"`, `newValue: "Inactivo"`, `channelOrModule: "tenants"` y
+`functionalProcessReference: "Cambio de estado de operador"`.
+
+### 3. Reactivarlo confirma el sentido inverso
+
+```bash
+curl -s -X POST http://localhost:8080/api/tenants/spec020-demo/reactivate \
+  -H "Content-Type: application/json" \
+  -d '{ "reason": "fin prueba spec 021", "actorId": "<membershipId admin>" }'
+
+curl -s http://localhost:8080/api/audit
+```
+
+Se espera que el registro más nuevo (`action: "TENANT_REACTIVATED"`) traiga
+`previousValue: "Inactivo"`, `newValue: "Activo"`, con el mismo `channelOrModule`
+y `functionalProcessReference` que el paso anterior.
+
+Ejecutado el 2026-09-05 contra la base de desarrollo local (mismo Postgres
+`multitour-postgres`, migración V18 aplicada, reutilizando el tenant de prueba
+`spec020-demo`). Los 3 pasos devolvieron los payloads exactos documentados arriba;
+los 52 registros de auditoría preexistentes (de specs 002-020) se siguieron leyendo
+sin error con los 4 campos nuevos en `null`.
+
+## 022 — Modificación de reserva antes de ejecución
+
+Corresponde a `specs/022-modificacion-reserva/`. Nuevo endpoint
+`POST .../reservations/{reservationId}/modify` que reemplaza `reservedServices`,
+`projectedValue` y `finalValue` de una reserva `Pendiente de pago` o `Confirmada`
+(misma precondición que `cancel()`, spec 011: no se permite si hay una transferencia
+pendiente de decisión), y recalcula `pendingBalance`/`creditBalance` reutilizando
+exactamente la fórmula de saldo a favor de `cancel()` (spec 011) y el ciclo
+`refundDecisionStatus` de spec 019 cuando el nuevo `finalValue` es menor a lo ya
+pagado. Requiere Postgres arriba (migración V19, columnas `modification_reason`,
+`modified_by`, `modified_at` en `reservations`), la app corriendo, el tenant
+`travesia-natural` `Activo`, y un token válido de `laura.gomez@example.com` (sección
+"007", pasos 1-2) para crear reservas nuevas.
+
+```bash
+TOKEN="<accessToken de la sección 007, paso 1>"
+```
+
+### 1. Compilación y tests
+
+```bash
+./mvnw test
+```
+
+Debe mantener `contextLoads` en verde, con la migración a versión 19 confirmada
+(columnas `modification_reason`, `modified_by`, `modified_at` en `reservations`).
+
+### 2. Modificar una reserva `Pendiente de pago` sin pagos (`200`)
+
+```bash
+curl -s -X POST http://localhost:8080/api/tenants/travesia-natural/reservations \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer ${TOKEN}" \
+  -d '{ "projectedValue": 200000, "reservedServices": [{ "serviceReference": "tour-laguna-verde", "partySize": 2, "scheduledDate": "2026-11-01" }] }'
+```
+
+Guardar el `reservationId` como `RES_T`, sin registrar ningún pago. Modificarla:
+
+```bash
+curl -i -X POST http://localhost:8080/api/tenants/travesia-natural/reservations/${RES_T}/modify \
+  -H "Content-Type: application/json" \
+  -d '{ "reservedServices": [{ "serviceReference": "tour-cocora", "partySize": 3, "scheduledDate": "2026-11-15" }],
+        "projectedValue": 350000, "finalValue": 350000,
+        "reason": "Cliente cambio de plan y de numero de viajeros", "actorId": "operador-1" }'
+```
+
+Se espera `200 OK` con `reservedServices` reemplazado por `tour-cocora`/3/2026-11-15,
+`finalValue: 350000`, `pendingBalance: 350000`, y `modificationReason`/`modifiedBy`
+con los valores enviados.
+
+### 3. Modificar una reserva `Confirmada` (saldo en 0) a un `finalValue` mayor (`200`)
+
+Crear `RES_U` igual que en el paso 2 (`projectedValue: 200000`) y pagarla en efectivo
+(igual que sección "009", paso 1) para llevarla a `Confirmada`:
+
+```bash
+curl -i -X POST http://localhost:8080/api/tenants/travesia-natural/reservations/${RES_U}/payments \
+  -H "Content-Type: application/json" \
+  -d '{ "method": "EFECTIVO", "amount": 200000 }'
+```
+
+Modificarla a un `finalValue` mayor:
+
+```bash
+curl -i -X POST http://localhost:8080/api/tenants/travesia-natural/reservations/${RES_U}/modify \
+  -H "Content-Type: application/json" \
+  -d '{ "reservedServices": [{ "serviceReference": "tour-laguna-verde", "partySize": 4, "scheduledDate": "2026-11-10" }],
+        "projectedValue": 320000, "finalValue": 320000,
+        "reason": "Cliente sumo dos viajeros mas", "actorId": "operador-1" }'
+```
+
+Se espera `200 OK` con `pendingBalance: 120000` (320000 - 200000 ya pagados),
+`creditBalance: 0` y `paymentStatus` sin cambios.
+
+### 4. Modificar una reserva con pago ya registrado a un `finalValue` menor (`200`, saldo a favor)
+
+Crear `RES_V` igual que en el paso 2 (`projectedValue: 200000`) y pagarla por completo
+en efectivo:
+
+```bash
+curl -i -X POST http://localhost:8080/api/tenants/travesia-natural/reservations/${RES_V}/payments \
+  -H "Content-Type: application/json" \
+  -d '{ "method": "EFECTIVO", "amount": 200000 }'
+```
+
+Modificarla a un `finalValue` menor a lo ya pagado:
+
+```bash
+curl -i -X POST http://localhost:8080/api/tenants/travesia-natural/reservations/${RES_V}/modify \
+  -H "Content-Type: application/json" \
+  -d '{ "reservedServices": [{ "serviceReference": "tour-laguna-verde", "partySize": 1, "scheduledDate": "2026-11-05" }],
+        "projectedValue": 130000, "finalValue": 130000,
+        "reason": "Cliente redujo el numero de viajeros", "actorId": "operador-1" }'
+```
+
+Se espera `200 OK` con `creditBalance: 70000` (200000 pagados - 130000 nuevo),
+`paymentStatus: "Saldo a favor pendiente"` y
+`refundDecisionStatus: "Pendiente de autorizacion"`.
+
+### 5. Modificar una reserva `EnEjecucion` o `Cancelada` (`409`)
+
+Reutilizar `RES_G` (`En ejecucion` desde sección "010", paso 1) y `RES_K` (`Cancelada`
+desde sección "011", paso 1):
+
+```bash
+curl -i -X POST http://localhost:8080/api/tenants/travesia-natural/reservations/${RES_G}/modify \
+  -H "Content-Type: application/json" \
+  -d '{ "reservedServices": [{ "serviceReference": "tour-laguna-verde", "partySize": 2, "scheduledDate": "2026-11-20" }],
+        "projectedValue": 250000, "finalValue": 250000,
+        "reason": "Intento de modificacion invalido", "actorId": "operador-1" }'
+```
+
+Se espera `409 Conflict` con `{"error":"reservation_not_modifiable", ...}`. Repetir
+sobre `RES_K`: mismo resultado.
+
+### 6. Modificar una reserva con una transferencia pendiente de decidir (`409`)
+
+Crear `RES_W` igual que en el paso 2 (`projectedValue: 200000`) y registrar una
+transferencia sin decidir (igual que sección "009", paso 4):
+
+```bash
+curl -i -X POST http://localhost:8080/api/tenants/travesia-natural/reservations/${RES_W}/payments \
+  -H "Content-Type: application/json" \
+  -d '{ "method": "TRANSFERENCIA", "amount": 200000, "supportReference": "comprobante-022.png" }'
+```
+
+Intentar modificarla sin resolver la transferencia:
+
+```bash
+curl -i -X POST http://localhost:8080/api/tenants/travesia-natural/reservations/${RES_W}/modify \
+  -H "Content-Type: application/json" \
+  -d '{ "reservedServices": [{ "serviceReference": "tour-laguna-verde", "partySize": 2, "scheduledDate": "2026-11-25" }],
+        "projectedValue": 220000, "finalValue": 220000,
+        "reason": "Intento de modificacion invalido", "actorId": "operador-1" }'
+```
+
+Se espera `409 Conflict` con `{"error":"reservation_not_modifiable", ...}`, y la
+reserva no cambia.
+
+### 7. Validaciones de entrada (`400`)
+
+Sobre `RES_T` (creada en el paso 2), tres variantes con el mismo `curl` base:
+
+```bash
+curl -i -X POST http://localhost:8080/api/tenants/travesia-natural/reservations/${RES_T}/modify \
+  -H "Content-Type: application/json" \
+  -d '{ "reservedServices": [], "projectedValue": 100000, "finalValue": 100000, "reason": "motivo", "actorId": "operador-1" }'
+
+curl -i -X POST http://localhost:8080/api/tenants/travesia-natural/reservations/${RES_T}/modify \
+  -H "Content-Type: application/json" \
+  -d '{ "reservedServices": [{ "serviceReference": "tour-laguna-verde", "partySize": 1, "scheduledDate": "2026-11-01" }], "projectedValue": -100, "finalValue": 100000, "reason": "motivo", "actorId": "operador-1" }'
+
+curl -i -X POST http://localhost:8080/api/tenants/travesia-natural/reservations/${RES_T}/modify \
+  -H "Content-Type: application/json" \
+  -d '{ "reservedServices": [{ "serviceReference": "tour-laguna-verde", "partySize": 1, "scheduledDate": "2026-11-01" }], "projectedValue": 100000, "finalValue": 100000, "reason": "", "actorId": "operador-1" }'
+```
+
+Las tres devuelven `400 Bad Request` con `{"error":"validation_error", ...}`, y la
+reserva no cambia.
+
+### 8. Tenant inexistente (`404`) y tenant `Inactivo` (`409`)
+
+```bash
+curl -i -X POST http://localhost:8080/api/tenants/no-existe/reservations/${RES_T}/modify \
+  -H "Content-Type: application/json" \
+  -d '{ "reservedServices": [{ "serviceReference": "tour-laguna-verde", "partySize": 1, "scheduledDate": "2026-11-01" }], "projectedValue": 100000, "finalValue": 100000, "reason": "motivo", "actorId": "operador-1" }'
+```
+
+Se espera `404 Not Found`. Luego, desactivar `travesia-natural` (paso 5 de la sección
+"002") y repetir la modificación: se espera `409 Conflict` con
+`{"error":"tenant_inactive", ...}`. Reactivar el tenant al terminar (paso 6 de esa
+sección).
+
+### Hallazgo de esta verificación
+
+La ejecución manual del paso 2 encontró un fallo real: `ReservationEntity.updateState(...)`
+nunca tuvo un parámetro `projectedValue` porque, antes de esta spec, ningún otro flujo
+(pago, cancelación, ejecución, devolución) cambiaba ese campo tras la creación de la
+reserva. El `GET` posterior a un `modify()` exitoso devolvía el `projectedValue` viejo
+mientras `finalValue`/`pendingBalance` sí quedaban actualizados. Se corrigió agregando
+`projectedValue` como primer parámetro de `updateState(...)` (`ReservationEntity.java`)
+y pasando `reservation.projectedValue()` en la llamada
+(`ReservationRepositoryAdapter.applyChanges`).
+
+Ejecutado el 2026-09-05 contra la base de desarrollo local (mismo Postgres
+`multitour-postgres`, migración V19 aplicada, tenant `travesia-natural`, cliente
+`laura.gomez@example.com` existente). `./mvnw test` en verde antes y después del fix
+anterior. Los 8 pasos de esta sección devolvieron los códigos HTTP y payloads exactos
+documentados arriba tras la corrección.
+
+## 023 — Aplicar descuento adicional a una reserva
+
+Corresponde a `specs/023-aplicar-descuento-reserva/`. Nuevo endpoint
+`POST .../reservations/{reservationId}/apply-discount` que recalcula `finalValue` a
+partir del valor ACTUAL (`newFinalValue = finalValue * (100 - percentage) / 100`),
+permitido solo desde `PendienteDePago`/`Confirmada`, reutilizando exactamente la misma
+fórmula de saldo a favor que `cancel()`/`modify()` (spec 011/022). Se puede aplicar más
+de una vez sobre la misma reserva (sin bloqueo, decisión abierta 1 de la spec). No hay
+migración nueva: la trazabilidad de cada aplicación queda en `common/audit`
+(`action: "RESERVATION_DISCOUNT_APPLIED"`), no en columnas nuevas de `reservations`.
+Requiere Postgres arriba, la app corriendo, el tenant `travesia-natural` `Activo`, y un
+token válido de `laura.gomez@example.com` (sección "007", pasos 1-2) para crear
+reservas nuevas.
+
+```bash
+TOKEN="<accessToken de la sección 007, paso 1>"
+```
+
+### 1. Compilación y tests
+
+```bash
+./mvnw test
+```
+
+Debe mantener `contextLoads` en verde; esta spec no agrega ninguna migración.
+
+### 2. Aplicar un descuento del 10% a una reserva `Pendiente de pago` sin pagos (`200`)
+
+```bash
+curl -s -X POST http://localhost:8080/api/tenants/travesia-natural/reservations \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer ${TOKEN}" \
+  -d '{ "projectedValue": 200000, "reservedServices": [{ "serviceReference": "tour-laguna-verde", "partySize": 2, "scheduledDate": "2026-12-01" }] }'
+```
+
+Guardar el `reservationId` como `RES_X`, sin registrar ningún pago. Aplicar el
+descuento:
+
+```bash
+curl -i -X POST http://localhost:8080/api/tenants/travesia-natural/reservations/${RES_X}/apply-discount \
+  -H "Content-Type: application/json" \
+  -d '{ "percentage": 10, "reason": "Cliente frecuente", "actorId": "operador-1" }'
+```
+
+Se espera `200 OK` con `finalValue: 180000` y `pendingBalance: 180000` (sin pagos
+previos, `pendingBalance` queda igual al nuevo `finalValue`).
+
+### 3. Aplicar un descuento sobre una reserva `Confirmada` (saldo en 0) que genera saldo a favor (`200`)
+
+Crear `RES_Y` igual que en el paso 2 (`projectedValue: 200000`) y pagarla por completo
+en efectivo (igual que sección "009", paso 1) para llevarla a `Confirmada`:
+
+```bash
+curl -i -X POST http://localhost:8080/api/tenants/travesia-natural/reservations/${RES_Y}/payments \
+  -H "Content-Type: application/json" \
+  -d '{ "method": "EFECTIVO", "amount": 200000 }'
+```
+
+Aplicar un descuento del 50%, que deja el nuevo `finalValue` por debajo de lo ya
+pagado:
+
+```bash
+curl -i -X POST http://localhost:8080/api/tenants/travesia-natural/reservations/${RES_Y}/apply-discount \
+  -H "Content-Type: application/json" \
+  -d '{ "percentage": 50, "reason": "Descuento por fidelidad", "actorId": "operador-1" }'
+```
+
+Se espera `200 OK` con `finalValue: 100000`, `pendingBalance: 0`,
+`creditBalance: 100000` (200000 pagados - 100000 nuevo), `paymentStatus: "Saldo a favor pendiente"`
+y `refundDecisionStatus: "Pendiente de autorizacion"`.
+
+### 4. Validaciones de entrada (`400`)
+
+Sobre `RES_X` (creada en el paso 2), tres variantes con el mismo `curl` base:
+
+```bash
+curl -i -X POST http://localhost:8080/api/tenants/travesia-natural/reservations/${RES_X}/apply-discount \
+  -H "Content-Type: application/json" \
+  -d '{ "percentage": 0, "reason": "motivo", "actorId": "operador-1" }'
+
+curl -i -X POST http://localhost:8080/api/tenants/travesia-natural/reservations/${RES_X}/apply-discount \
+  -H "Content-Type: application/json" \
+  -d '{ "percentage": 101, "reason": "motivo", "actorId": "operador-1" }'
+
+curl -i -X POST http://localhost:8080/api/tenants/travesia-natural/reservations/${RES_X}/apply-discount \
+  -H "Content-Type: application/json" \
+  -d '{ "percentage": 10, "reason": "", "actorId": "operador-1" }'
+```
+
+Las tres devuelven `400 Bad Request` con `{"error":"validation_error", ...}`, y la
+reserva no cambia.
+
+### 5. Aplicar sobre una reserva `EnEjecucion`, `Finalizada` o `Cancelada` (`409`)
+
+Reutilizar `RES_G` (`En ejecucion` desde sección "010", paso 1), `RES_Q` (`Finalizada`
+desde sección "015") y `RES_K` (`Cancelada` desde sección "011", paso 1):
+
+```bash
+curl -i -X POST http://localhost:8080/api/tenants/travesia-natural/reservations/${RES_G}/apply-discount \
+  -H "Content-Type: application/json" \
+  -d '{ "percentage": 10, "reason": "Intento de descuento invalido", "actorId": "operador-1" }'
+```
+
+Se espera `409 Conflict` con `{"error":"reservation_not_discountable", ...}`. Repetir
+sobre `RES_Q` y `RES_K`: mismo resultado.
+
+### 6. Tenant inexistente (`404`) y tenant `Inactivo` (`409`)
+
+```bash
+curl -i -X POST http://localhost:8080/api/tenants/no-existe/reservations/${RES_X}/apply-discount \
+  -H "Content-Type: application/json" \
+  -d '{ "percentage": 10, "reason": "motivo", "actorId": "operador-1" }'
+```
+
+Se espera `404 Not Found`. Luego, desactivar `travesia-natural` (paso 5 de la sección
+"002") y repetir la aplicación del descuento: se espera `409 Conflict` con
+`{"error":"tenant_inactive", ...}`. Reactivar el tenant al terminar (paso 6 de esa
+sección).
+
+### 7. Trazabilidad en `common/audit`
+
+```bash
+curl -s http://localhost:8080/api/audit | grep -o '"action":"RESERVATION_DISCOUNT_APPLIED"[^}]*'
+```
+
+Se espera al menos un registro por cada aplicación de descuento del paso 2 y 3, con
+`previousValue`/`newValue` iguales al `finalValue` antes/después de cada aplicación, y
+`functionalProcessReference` con el formato "Aplicación de descuento adicional: N%".
+
+Ejecutado el 2026-09-05 contra la base de desarrollo local (mismo Postgres
+`multitour-postgres`, tenant `travesia-natural`, cliente `laura.gomez@example.com`
+existente). `./mvnw test` en verde (sin migración nueva, `contextLoads` mantiene la
+versión 19). Los pasos 5 y 6 reutilizaron reservas reales ya existentes en la base
+persistida (`En ejecucion`, `Finalizada`, `Cancelada`) en vez de las variables `RES_G`/
+`RES_Q`/`RES_K` documentadas arriba, porque esos ids son de una sesión anterior y no
+quedaron guardados en ningún archivo de este repositorio; el resultado (`409
+reservation_not_discountable`) fue el mismo esperado. Los 7 pasos de esta sección
+devolvieron los códigos HTTP y payloads exactos documentados arriba, sin ningún hallazgo
+nuevo.
+
+## 024 — Transporte en reserva
+
+Corresponde a `specs/024-transporte-en-reserva/`. `ReservedService` gana
+`transportItemId` (UUID opcional de un `CatalogItem` de `type: TRANSPORT`) y
+`transportCost` (calculado en el servidor, `price * partySize`, nunca recibido del
+cliente). Migración `V20__add_transport_fields_to_reserved_services.sql` (columnas
+nullable en `reserved_services`). Cualquier `transportItemId` inválido (inexistente,
+otro tenant, tipo distinto de TRANSPORT, inactivo) devuelve `400 validation_error`
+reutilizando `InvalidReservationException`, no una excepción nueva. Requiere Postgres
+arriba, la app corriendo, el tenant `travesia-natural` `Activo`, y un token válido de
+`laura.gomez@example.com` (sección "007", paso 1) para crear reservas nuevas.
+
+```bash
+TOKEN="<accessToken de la sección 007, paso 1>"
+```
+
+### 1. Compilación y migración
+
+```bash
+./mvnw test
+```
+
+Debe migrar a la versión 20 (`add transport fields to reserved services`) y mantener
+`contextLoads` en verde.
+
+### 2. Catálogo de apoyo: un TRANSPORT activo, un TRANSPORT inactivo y un TOUR
+
+```bash
+curl -s -X POST http://localhost:8080/api/tenants/travesia-natural/catalog-items \
+  -H "Content-Type: application/json" \
+  -d '{ "type": "TRANSPORT", "name": "Transporte Desierto Tatacoa", "price": 30000 }'
+
+curl -s -X POST http://localhost:8080/api/tenants/travesia-natural/catalog-items \
+  -H "Content-Type: application/json" \
+  -d '{ "type": "TRANSPORT", "name": "Transporte fuera de servicio", "price": 20000 }'
+
+curl -s -X POST http://localhost:8080/api/tenants/travesia-natural/catalog-items \
+  -H "Content-Type: application/json" \
+  -d '{ "type": "TOUR", "name": "Caminata Cocora Spec024", "price": 120000 }'
+```
+
+Guardar los tres `catalogItemId` como `TRANSPORT_OK`, `TRANSPORT_INACTIVE` y `TOUR_ID`.
+Desactivar el segundo:
+
+```bash
+curl -i -X POST http://localhost:8080/api/tenants/travesia-natural/catalog-items/${TRANSPORT_INACTIVE}/deactivate
+```
+
+### 3. Crear una reserva con `transportItemId` válido (`201`)
+
+```bash
+curl -s -X POST http://localhost:8080/api/tenants/travesia-natural/reservations \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer ${TOKEN}" \
+  -d '{ "projectedValue": 260000, "reservedServices": [{ "serviceReference": "tour-desierto-tatacoa", "partySize": 2, "scheduledDate": "2026-12-15", "transportItemId": "'"${TRANSPORT_OK}"'" }] }'
+```
+
+Se espera `201 Created` con `reservedServices[0].transportItemId` igual a
+`TRANSPORT_OK` y `transportCost: 60000` (`30000 * 2`). Confirmar con un `GET`
+posterior a la reserva que ambos campos persisten igual.
+
+### 4. Crear una reserva sin transporte (`201`, ambos campos `null`)
+
+```bash
+curl -s -X POST http://localhost:8080/api/tenants/travesia-natural/reservations \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer ${TOKEN}" \
+  -d '{ "projectedValue": 100000, "reservedServices": [{ "serviceReference": "tour-laguna-verde", "partySize": 1, "scheduledDate": "2026-12-20" }] }'
+```
+
+Se espera `201 Created` con `reservedServices[0].transportItemId` y
+`reservedServices[0].transportCost` en `null`.
+
+### 5. `transportItemId` inválido — cuatro sub-casos (`400` cada uno)
+
+```bash
+curl -i -X POST http://localhost:8080/api/tenants/travesia-natural/reservations \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer ${TOKEN}" \
+  -d '{ "projectedValue": 100000, "reservedServices": [{ "serviceReference": "tour-laguna-verde", "partySize": 1, "scheduledDate": "2026-12-20", "transportItemId": "00000000-0000-0000-0000-000000000000" }] }'
+
+curl -i -X POST http://localhost:8080/api/tenants/travesia-natural/reservations \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer ${TOKEN}" \
+  -d '{ "projectedValue": 100000, "reservedServices": [{ "serviceReference": "tour-laguna-verde", "partySize": 1, "scheduledDate": "2026-12-20", "transportItemId": "'"${TOUR_ID}"'" }] }'
+
+curl -i -X POST http://localhost:8080/api/tenants/travesia-natural/reservations \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer ${TOKEN}" \
+  -d '{ "projectedValue": 100000, "reservedServices": [{ "serviceReference": "tour-laguna-verde", "partySize": 1, "scheduledDate": "2026-12-20", "transportItemId": "'"${TRANSPORT_INACTIVE}"'" }] }'
+```
+
+Las tres devuelven `400 Bad Request` con `{"error":"validation_error", ...}` (inexistente,
+tipo distinto de TRANSPORT, e inactivo respectivamente), y no se crea ninguna reserva.
+Para el cuarto sub-caso (`transportItemId` de otro tenant), crear un segundo tenant con
+su propio `TRANSPORT` (mismo patrón que sección "005", paso 3) y usar ese
+`catalogItemId` contra `travesia-natural`: mismo `400 validation_error`.
+
+### 6. Aislamiento/tenant `Inactivo` ya cubiertos por spec 007
+
+Con el JWT ya enforced (spec 007), `POST /reservations` no puede usarse para comprobar
+el `404` de "tenant inexistente" — mismo hueco ya documentado en la sección "007", paso
+4 (un token siempre lleva el tenant como claim, así que una URL con otro tenant o uno
+inexistente resuelve `403 tenant_mismatch` antes de llegar a la validación de
+transporte). El criterio que sí sigue vigente y se re-verificó en esta sección es
+tenant `Inactivo` → `409 tenant_inactive` (paso 6 de la sección "007"), reutilizando el
+mismo `TOKEN` y el mismo `transportItemId` válido del paso 3:
+
+```bash
+curl -i -X POST http://localhost:8080/api/tenants/travesia-natural/deactivate \
+  -H "Content-Type: application/json" \
+  -d '{ "reason": "Verificacion spec024", "actorId": "platform-admin@multitour.dev" }'
+
+curl -i -X POST http://localhost:8080/api/tenants/travesia-natural/reservations \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer ${TOKEN}" \
+  -d '{ "projectedValue": 100000, "reservedServices": [{ "serviceReference": "tour-laguna-verde", "partySize": 1, "scheduledDate": "2026-12-20", "transportItemId": "'"${TRANSPORT_OK}"'" }] }'
+```
+
+Se espera `409 Conflict` con `{"error":"tenant_inactive", ...}`. Reactivar el tenant al
+terminar (paso 6 de la sección "007").
+
+Ejecutado el 2026-09-05 contra la base de desarrollo local (mismo Postgres
+`multitour-postgres`, tenant `travesia-natural`, cliente `laura.gomez@example.com`
+existente). `./mvnw test` en verde, migración a versión 20 confirmada. Los pasos 1-5 de
+esta sección devolvieron los códigos HTTP y payloads exactos documentados arriba. El
+paso 6 reveló que el criterio de aceptación "tenant inexistente → 404" ya no es
+alcanzable desde este endpoint (lo intercepta el JWT con `403 tenant_mismatch`, mismo
+hallazgo ya registrado en la sección "007") — no es un hallazgo nuevo de esta spec, así
+que se ajustó el texto del paso 6 en vez de dejar la afirmación original sin verificar;
+`tenant_inactive` sí se confirmó con `409` como estaba previsto.
+
+## 026 — Login staff y Platform Administrator
+
+Corresponde a `specs/026-login-staff-y-administrador-plataforma/`. No agrega ningún
+endpoint: reutiliza `POST /api/tenants/{tenantId}/login` (spec 004) para dos casos que
+antes no lo consumían — "Equipo del operador" (Administrador/Colaborador) del Frontend,
+y "Acceso de plataforma" (Platform Administrator) contra el tenant reservado `platform`
+sembrado por `PlatformAdministratorSeeder` al arrancar la aplicación.
+
+### 1. Compilación y tests (con el seeder corriendo en el contexto de test)
+
+```bash
+./mvnw -q test
+```
+
+`contextLoads` (`TravesiaNaturalApplicationTests`) levanta el contexto completo de
+Spring, así que `PlatformAdministratorSeeder` corre también ahí. Confirmado en verde.
+
+### 2. Primer arranque: seed del tenant `platform` y su Platform Administrator
+
+```bash
+./mvnw spring-boot:run
+```
+
+Confirmado por consulta directa a la base:
+
+```sql
+SELECT tenant_id, commercial_name, tenant_status FROM tenants WHERE tenant_id='platform';
+SELECT membership_id, tenant_id, email, role, membership_status FROM memberships WHERE tenant_id='platform';
+```
+
+Resultado: una fila en `tenants` (`platform`, "Multitour (plataforma)", `ACTIVO`) y una
+en `memberships` (`admin@multitour.plataforma`, `PLATFORM_ADMINISTRATOR`, `ACTIVA`).
+
+### 3. Login del Platform Administrator (`200`)
+
+```bash
+curl -i -X POST http://localhost:8080/api/tenants/platform/login \
+  -H "Content-Type: application/json" \
+  -d '{ "email": "admin@multitour.plataforma", "password": "Multitour#2026" }'
+```
+
+Se espera `200 OK` con `role: "PLATFORM_ADMINISTRATOR"` y `tenantId: "platform"`, mismo
+contrato de `LoginResponse` que cualquier otro tenant.
+
+### 4. Password incorrecto en el tenant `platform` (`401` genérico)
+
+```bash
+curl -i -X POST http://localhost:8080/api/tenants/platform/login \
+  -H "Content-Type: application/json" \
+  -d '{ "email": "admin@multitour.plataforma", "password": "incorrecta" }'
+```
+
+Se espera `401` con el mismo cuerpo genérico de spec 004
+(`{"error":"invalid_credentials","message":"email o password incorrectos"}`).
+
+### 5. Reinicio de la aplicación: el seed no duplica nada
+
+```bash
+# detener el proceso y volver a arrancarlo
+./mvnw spring-boot:run
+```
+
+Repetir la consulta del paso 2: sigue existiendo exactamente una fila en `tenants` y una
+en `memberships` para `platform` — `existsById("platform")` corta el seed antes de
+insertar de nuevo.
+
+### 6. Login de Administrador/Colaborador reales (rol correcto en la respuesta)
+
+Requiere un tenant `travesia-natural` con un Administrador (spec 002) y un Colaborador
+(spec 014) ya creados — reutilizar los de la sección "014" si existen, o crear ambos:
+
+```bash
+curl -i -X POST http://localhost:8080/api/tenants \
+  -H "Content-Type: application/json" \
+  -d '{ "tenantId": "travesia-natural", "commercialName": "Travesia Natural",
+        "administrator": { "email": "admin@travesia-natural.com", "password": "Admin123!", "passwordConfirmation": "Admin123!" },
+        "actorId": "verificacion-spec026" }'
+
+curl -i -X POST http://localhost:8080/api/tenants/travesia-natural/collaborators \
+  -H "Content-Type: application/json" \
+  -d '{ "name": "Laura Colaboradora", "email": "colaborador@travesia-natural.com", "password": "Colab123!", "passwordConfirmation": "Colab123!", "actorId": "verificacion-spec026" }'
+
+curl -i -X POST http://localhost:8080/api/tenants/travesia-natural/login \
+  -H "Content-Type: application/json" \
+  -d '{ "email": "admin@travesia-natural.com", "password": "Admin123!" }'
+
+curl -i -X POST http://localhost:8080/api/tenants/travesia-natural/login \
+  -H "Content-Type: application/json" \
+  -d '{ "email": "colaborador@travesia-natural.com", "password": "Colab123!" }'
+```
+
+Se espera `200 OK` en ambos logins, con `role: "ADMINISTRATOR"` y
+`role: "OPERATIONAL_COLLABORATOR"` respectivamente — confirma que `LoginService` no
+filtra por rol (mismo endpoint, mismo contrato, distinto `role` en la respuesta), la
+premisa central de la spec 026 para no tocar Backend en el caso 1a.
+
+Ejecutado el 2026-09-06 contra la base de desarrollo local (Postgres
+`multitour-postgres`, puerto interno 8090 para no chocar con el contenedor
+`multitour-backend` ya corriendo en 8081 — mismo comportamiento documentado aquí con el
+puerto estándar 8080). `./mvnw test` en verde. El tenant `travesia-natural` no existía
+todavía en esta base (solo specs previas que se limpiaron o nunca se persistieron ahí);
+se creó como parte de esta verificación, junto con el Administrador y el Colaborador de
+prueba. Los 6 pasos devolvieron los códigos HTTP y payloads exactos documentados arriba,
+incluyendo la confirmación de idempotencia del seed tras un segundo arranque real (no
+solo en el contexto de test).
+
+**Nota posterior (2026-09-06):** los pasos 1-6 de esta sección corren contra el Backend
+por `curl` y siguen siendo válidos tal cual. El código de Frontend que los consumía
+(`login.component.ts`, `admin-login.component.ts`) se implementó y verificó el mismo
+día, pero fue revertido después por decisión del responsable humano — el Frontend es
+autoría de una compañera de equipo. Ver `specs/026.../spec.md` y
+`PROPUESTA-INTEGRACION-LOGIN-Y-RESERVA-FRONTEND.md` (raíz del workspace).
+
+## 027 — Flujo de autoservicio: registro → login → reservar
+
+Corresponde a `specs/027-flujo-autoservicio-reserva-cliente/`. Encadena tres endpoints
+ya existentes y verificados por separado (specs 003, 004, 001/017/018) para confirmar
+que sostienen, de punta a punta, el primer flujo de escritura real consumido desde el
+Frontend. Requiere Postgres arriba, la app corriendo, y el tenant `travesia-natural`
+`Activo` (sección "026", paso 6, o ya existente).
+
+### 1. Registro de un cliente nuevo (`201`)
+
+```bash
+curl -i -X POST http://localhost:8080/api/tenants/travesia-natural/customers \
+  -H "Content-Type: application/json" \
+  -d '{ "firstName": "Laura", "lastName": "Gomez", "email": "laura.gomez.spec027@example.com",
+        "phone": "3001234567", "password": "Cliente123!", "passwordConfirmation": "Cliente123!" }'
+```
+
+Se espera `201 Created` con `role: "END_CUSTOMER"`, `membershipStatus: "ACTIVA"`, sin
+`passwordHash` en la respuesta.
+
+### 2. Login del cliente recién registrado (`200`)
+
+```bash
+curl -s -X POST http://localhost:8080/api/tenants/travesia-natural/login \
+  -H "Content-Type: application/json" \
+  -d '{ "email": "laura.gomez.spec027@example.com", "password": "Cliente123!" }'
+```
+
+Guardar `accessToken` como `TOKEN`.
+
+### 3. Crear una reserva real con ese token (`201`)
+
+```bash
+curl -i -X POST http://localhost:8080/api/tenants/travesia-natural/reservations \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer ${TOKEN}" \
+  -d '{ "projectedValue": 350000,
+        "reservedServices": [{ "serviceReference": "tour-laguna-verde", "partySize": 2, "scheduledDate": "2026-12-20", "transportItemId": null }],
+        "holderDocument": "1234567890",
+        "companions": [{ "name": "Carlos Gomez", "document": "0987654321", "birthDate": "1995-05-10" }] }'
+```
+
+Se espera `201 Created` con `customerId` igual al `membershipId` del paso 1,
+`reservationStatus: "Pendiente de pago"`, `paymentStatus: "Sin pago"`,
+`pendingBalance: 350000`. Confirma que `serviceReference` acepta el `key` del catálogo
+mock del Frontend (`"tour-laguna-verde"`) como texto libre, sin exigir que exista un
+`CatalogItem` real con esa referencia — la premisa de diseño de spec 027 para no migrar
+el formulario de reserva al catálogo real en este corte.
+
+### 4. La reserva es visible desde el dashboard del operador (`GET`, sin auth)
+
+```bash
+curl -s http://localhost:8080/api/tenants/travesia-natural/reservations
+```
+
+Se espera ver la reserva del paso 3 en el listado (spec 006).
+
+### 5. Crear una reserva sin token (`401`)
+
+```bash
+curl -i -X POST http://localhost:8080/api/tenants/travesia-natural/reservations \
+  -H "Content-Type: application/json" \
+  -d '{ "projectedValue": 100000, "reservedServices": [{ "serviceReference": "tour-x", "partySize": 1, "scheduledDate": "2026-12-20", "transportItemId": null }], "holderDocument": "111", "companions": [] }'
+```
+
+Se espera `401 Unauthorized` con `{"error":"unauthorized","message":"missing or invalid token"}`
+(spec 007), sin crear ninguna reserva.
+
+### 6. Compilación y tests
+
+```bash
+./mvnw test
+```
+
+Debe mantenerse en verde, sin cambios de contrato respecto a specs 001-026.
+
+Ejecutado el 2026-09-06 contra la misma base de desarrollo local de la sección "026"
+(puerto interno 8090). Los 5 pasos de flujo devolvieron los códigos HTTP y payloads
+exactos documentados arriba: registro `201`, login `200` con `role: "END_CUSTOMER"`,
+reserva `201` con `pendingBalance: 350000`, reserva visible en el listado del operador,
+y rechazo `401` sin token. `./mvnw test` en verde antes y después de esta verificación.
+
+**Nota posterior (2026-09-06):** los pasos 1-5 corren 100% contra el Backend por `curl`,
+sin ningún Frontend de por medio, y siguen siendo válidos tal cual — esta spec nunca
+tocó el Backend. El código de Frontend que habría encadenado este flujo desde una
+pantalla real (`signup.component.ts`, `client-tour-booking.component.ts`) se implementó
+y verificó el mismo día, pero fue revertido después por decisión del responsable
+humano — el Frontend es autoría de una compañera de equipo. Ver
+`specs/027.../spec.md` y `PROPUESTA-INTEGRACION-LOGIN-Y-RESERVA-FRONTEND.md` (raíz del
+workspace).

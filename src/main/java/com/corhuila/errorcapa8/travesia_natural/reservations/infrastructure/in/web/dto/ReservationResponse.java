@@ -1,0 +1,64 @@
+package com.corhuila.errorcapa8.travesia_natural.reservations.infrastructure.in.web.dto;
+
+import com.corhuila.errorcapa8.travesia_natural.reservations.domain.model.Reservation;
+
+import java.math.BigDecimal;
+import java.time.Instant;
+import java.util.List;
+import java.util.UUID;
+
+public record ReservationResponse(UUID reservationId, String tenantId, String customerId,
+                                   List<ReservedServiceResponse> reservedServices, BigDecimal projectedValue,
+                                   BigDecimal finalValue, BigDecimal pendingBalance, BigDecimal creditBalance,
+                                   String reservationStatus, String paymentStatus, String paymentMethod,
+                                   Instant createdAt, BigDecimal pendingTransferAmount,
+                                   String transferSupportReference, String cancellationReason, String cancelledBy,
+                                   Instant cancelledAt, String refundDecisionStatus, String refundAuthorizedBy,
+                                   Instant refundAuthorizedAt, String refundAuthorizationNote,
+                                   String refundRejectedBy, Instant refundRejectedAt, String refundRejectionReason,
+                                   BigDecimal refundedAmount, String refundReason,
+                                   String refundedBy, String refundMethod, Instant refundedAt, String finalizedBy,
+                                   Instant finalizedAt, String modificationReason, String modifiedBy,
+                                   Instant modifiedAt, String holderDocument,
+                                   List<CompanionResponse> companions) {
+
+    public static ReservationResponse from(Reservation reservation) {
+        return new ReservationResponse(
+                reservation.reservationId(),
+                reservation.tenantId(),
+                reservation.customerId(),
+                reservation.reservedServices().stream().map(ReservedServiceResponse::from).toList(),
+                reservation.projectedValue(),
+                reservation.finalValue(),
+                reservation.pendingBalance(),
+                reservation.creditBalance(),
+                reservation.reservationStatus().label(),
+                reservation.paymentStatus().label(),
+                reservation.paymentMethod(),
+                reservation.createdAt(),
+                reservation.pendingTransferAmount(),
+                reservation.transferSupportReference(),
+                reservation.cancellationReason(),
+                reservation.cancelledBy(),
+                reservation.cancelledAt(),
+                reservation.refundDecisionStatus() == null ? null : reservation.refundDecisionStatus().label(),
+                reservation.refundAuthorizedBy(),
+                reservation.refundAuthorizedAt(),
+                reservation.refundAuthorizationNote(),
+                reservation.refundRejectedBy(),
+                reservation.refundRejectedAt(),
+                reservation.refundRejectionReason(),
+                reservation.refundedAmount(),
+                reservation.refundReason(),
+                reservation.refundedBy(),
+                reservation.refundMethod(),
+                reservation.refundedAt(),
+                reservation.finalizedBy(),
+                reservation.finalizedAt(),
+                reservation.modificationReason(),
+                reservation.modifiedBy(),
+                reservation.modifiedAt(),
+                reservation.holderDocument(),
+                reservation.companions().stream().map(CompanionResponse::from).toList());
+    }
+}

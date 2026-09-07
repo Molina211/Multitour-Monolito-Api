@@ -1,0 +1,4 @@
+package com.corhuila.errorcapa8.travesia_natural.tenants.infrastructure.in.web.dto;
+
+public record TenantLifecycleRequest(String reason, String actorId) {
+}
