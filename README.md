@@ -1,4 +1,4 @@
-# Multitour — Backend (rama `qa`)
+# Multitour — Backend (rama `main`)
 
 Backend del walking skeleton de **Multitour**, plataforma de turismo multitenant
 (primer caso de uso: Travesía Natural). Spring Boot 4.1.1, Java 21, PostgreSQL,
@@ -6,10 +6,11 @@ arquitectura hexagonal por módulo de negocio sobre un monolito modular.
 
 ## Sobre esta rama
 
-`qa` recibe el trabajo de `develop` mediante merges que siempre piden autorización
-explícita — nunca se comitea directamente aquí. Es el punto de control antes de
-promover a `main`: si estás leyendo esto en `qa`, este es el estado que se considera
-listo para validar, no necesariamente lo último que existe en `develop`.
+`main` recibe el trabajo de `qa` mediante merges que siempre piden autorización
+explícita — nunca se comitea directamente aquí. Es el estado publicado: cada llegada
+a `main` se acompaña de un GitHub Release y una copia en `docs/05-release/` (repo
+Docs, autorización siempre). Si estás leyendo esto en `main`, este es el estado
+validado en QA y liberado más reciente.
 
 ## Cómo desplegar (con Docker, recomendado)
 
