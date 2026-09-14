@@ -1,16 +1,24 @@
-# Multitour — Backend (rama `develop`)
+# Multitour — Backend
 
 Backend del walking skeleton de **Multitour**, plataforma de turismo multitenant
 (primer caso de uso: Travesía Natural). Spring Boot 4.1.1, Java 21, PostgreSQL,
 arquitectura hexagonal por módulo de negocio sobre un monolito modular.
 
-## Sobre esta rama
+## Flujo de ramas
 
-`develop` es donde vive el trabajo diario del Backend: aquí se implementa y se comitea
-cada spec cerrada (`specs/001-...` en adelante) antes de promoverla a `qa` y luego a
-`main`, mediante merges que siempre piden autorización explícita por separado. Si estás
-leyendo esto en `develop`, tienes el estado más reciente del Backend — puede incluir
-trabajo que todavía no pasó el corte de QA.
+Este README es el mismo en `develop`, `qa` y `main` — no describe una rama en
+particular, describe el flujo completo:
+
+- **`develop`** — trabajo diario del Backend. Aquí se implementa y se comitea cada spec
+  cerrada (`specs/001-...` en adelante).
+- **`qa`** — recibe el trabajo de `develop` mediante merge, siempre con autorización
+  explícita. Es el punto de control antes de promover a `main`.
+- **`main`** — estado de release. Nadie comitea directo aquí; solo llega vía merge desde
+  `qa`, también con autorización explícita. Cada llegada a `main` se marca con un tag de
+  versión (ej. `v1.0.0`).
+
+Si quieres saber en qué punto de ese flujo está el código que tienes delante, revisa la
+rama con `git branch --show-current`, no este archivo.
 
 ## Cómo desplegar (con Docker, recomendado)
 
