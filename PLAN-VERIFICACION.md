@@ -3487,3 +3487,63 @@ y verificó el mismo día, pero fue revertido después por decisión del respons
 humano — el Frontend es autoría de una compañera de equipo. Ver
 `specs/027.../spec.md` y `PROPUESTA-INTEGRACION-LOGIN-Y-RESERVA-FRONTEND.md` (raíz del
 workspace).
+
+## 028 — Actuator health endpoint para healthcheck de Docker
+
+Corresponde a `specs/028-actuator-health-endpoint/`. Weekly Challenge Semana 06,
+Sesión 1: healthcheck real del backend para que `docker-compose.yml` condicione el
+arranque del frontend a que el backend esté realmente listo, no solo a que el
+contenedor haya iniciado.
+
+### 1. Compilación
+
+```bash
+./mvnw compile
+```
+
+Sin errores tras agregar `spring-boot-starter-actuator` al `pom.xml`.
+
+### 2. Levantar el stack completo con `docker compose up`
+
+```bash
+docker compose up -d --build
+docker compose ps
+```
+
+Se espera `multitour-postgres` y `multitour-backend` en `healthy`, `multitour-frontend`
+arrancando después de que `backend` queda sano (`depends_on: condition: service_healthy`).
+
+### 3. Verificar `/actuator/health` sin detalle de componentes
+
+```bash
+curl -s http://localhost:8081/actuator/health
+```
+
+Se espera `200` con `{"status":"UP", ...}` sin desglose de componentes individuales
+(`management.endpoint.health.show-details=never`, porque el endpoint cae bajo
+`anyRequest().permitAll()` de spec 007).
+
+### 4. Verificar `/actuator/info`
+
+```bash
+curl -s http://localhost:8081/actuator/info
+```
+
+Se espera `200`.
+
+### 5. Frontend accesible
+
+```bash
+curl -s -o /dev/null -w "%{http_code}\n" http://localhost:8080/
+```
+
+Se espera `200`.
+
+---
+
+Ejecutado el 2026-09-13. `./mvnw compile` en verde. `docker compose up -d --build`
+levantó los 3 contenedores: `multitour-postgres` y `multitour-backend` en estado
+`healthy`, `multitour-frontend` arrancó una vez `backend` quedó sano. `/actuator/health`
+devolvió `{"groups":["liveness","readiness"],"status":"UP"}` (sin detalle de
+componentes). `/actuator/info` devolvió `{}` (`200`). Frontend respondió `200` en
+`localhost:8080`. Los 6 criterios de aceptación de la spec 028 quedan cumplidos.
