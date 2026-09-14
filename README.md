@@ -1,15 +1,24 @@
-# Multitour — Backend (rama `qa`)
+# Multitour — Backend
 
 Backend del walking skeleton de **Multitour**, plataforma de turismo multitenant
 (primer caso de uso: Travesía Natural). Spring Boot 4.1.1, Java 21, PostgreSQL,
 arquitectura hexagonal por módulo de negocio sobre un monolito modular.
 
-## Sobre esta rama
+## Flujo de ramas
 
-`qa` recibe el trabajo de `develop` mediante merges que siempre piden autorización
-explícita — nunca se comitea directamente aquí. Es el punto de control antes de
-promover a `main`: si estás leyendo esto en `qa`, este es el estado que se considera
-listo para validar, no necesariamente lo último que existe en `develop`.
+Este README es el mismo en `develop`, `qa` y `main` — no describe una rama en
+particular, describe el flujo completo:
+
+- **`develop`** — trabajo diario del Backend. Aquí se implementa y se comitea cada spec
+  cerrada (`specs/001-...` en adelante).
+- **`qa`** — recibe el trabajo de `develop` mediante merge, siempre con autorización
+  explícita. Es el punto de control antes de promover a `main`.
+- **`main`** — estado de release. Nadie comitea directo aquí; solo llega vía merge desde
+  `qa`, también con autorización explícita. Cada llegada a `main` se marca con un tag de
+  versión (ej. `v1.0.0`).
+
+Si quieres saber en qué punto de ese flujo está el código que tienes delante, revisa la
+rama con `git branch --show-current`, no este archivo.
 
 ## Cómo desplegar (con Docker, recomendado)
 
@@ -55,7 +64,7 @@ local — **no aptos para producción**.
 
 Cada spec cerrada tiene su sección correspondiente en `PLAN-VERIFICACION.md`, con los
 pasos exactos (`curl`, SQL) para comprobar manualmente que la funcionalidad sirve contra
-un servidor real — la misma evidencia que respalda que este estado está listo para QA.
+un servidor real.
 
 ## Más contexto
 
