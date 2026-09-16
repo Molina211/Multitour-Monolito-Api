@@ -1,6 +1,6 @@
 # 029 — ArchUnit Architecture Conformance Tests
 
-**Estado:** APROBADA
+**Estado:** TERMINADA
 **Fecha:** 2026-09-16
 **Repos afectados:** backend
 **HU relacionada:** ninguna
@@ -53,14 +53,14 @@ catch it.
   table, but a different concern from the 5 rules above; not included here.
 
 ## Criterios de aceptación
-- [ ] `mvn test` runs an ArchUnit test suite alongside the existing tests.
-- [ ] There is at least one ArchUnit rule per non-negotiable listed in Alcance (5
+- [x] `mvn test` runs an ArchUnit test suite alongside the existing tests.
+- [x] There is at least one ArchUnit rule per non-negotiable listed in Alcance (5
       rules total: Hexagonal ×2, DDD, SOLID-DIP, multitenancy).
-- [ ] Each rule applies to all 7 business modules, not only `reservations`.
-- [ ] A deliberately introduced violation (e.g. a `domain` class importing
+- [x] Each rule applies to all 7 business modules, not only `reservations`.
+- [x] A deliberately introduced violation (e.g. a `domain` class importing
       `infrastructure`) makes the corresponding ArchUnit rule fail — verified by hand
       before closing the spec.
-- [ ] The suite stays green against the current codebase; any real violation the
+- [x] The suite stays green against the current codebase; any real violation the
       rules surface gets documented as a separate finding, not silently fixed inside
       this spec without an explicit decision.
 
