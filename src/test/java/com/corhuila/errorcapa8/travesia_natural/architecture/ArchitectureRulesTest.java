@@ -9,11 +9,8 @@ import com.tngtech.archunit.lang.ArchRule;
 import com.tngtech.archunit.lang.ConditionEvents;
 import com.tngtech.archunit.lang.SimpleConditionEvent;
 
-import static com.tngtech.archunit.base.DescribedPredicate.alwaysTrue;
-import static com.tngtech.archunit.core.domain.JavaClass.Predicates.resideInAPackage;
 import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.classes;
 import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.noClasses;
-import static com.tngtech.archunit.library.dependencies.SlicesRuleDefinition.slices;
 
 /**
  * Automated architecture conformance tests for the non-negotiable standards in
@@ -42,14 +39,52 @@ class ArchitectureRulesTest {
                     .because("Hexagonal architecture: application must depend on ports (*Port), "
                             + "never directly on adapters (*Adapter) (CLAUDE.md section 7)");
 
+    // A module's "domain" package (ports, model, exceptions) is its public contract -
+    // other modules may depend on it freely, same as "common". Only a module's
+    // "application" and "infrastructure" packages are internal implementation details;
+    // depending on those from a DIFFERENT module is the real bounded-context leak.
     @ArchTest
-    static final ArchRule modules_should_not_depend_on_each_other =
-            slices().matching("..travesia_natural.(*)..")
-                    .should().notDependOnEachOther()
-                    .ignoreDependency(alwaysTrue(), resideInAPackage("..common.."))
-                    .because("DDD: business modules are separate bounded contexts and must not "
-                            + "depend on each other's internals; 'common' is intentionally shared "
-                            + "cross-cutting code, excluded from this rule (CLAUDE.md section 7)");
+    static final ArchRule modules_should_not_depend_on_each_others_internals =
+            noClasses().should(new ArchCondition<JavaClass>(
+                    "not depend on another module's application or infrastructure classes") {
+                @Override
+                public void check(JavaClass item, ConditionEvents events) {
+                    String itemModule = moduleOf(item);
+                    if (itemModule == null) {
+                        return;
+                    }
+                    item.getDirectDependenciesFromSelf().forEach(dependency -> {
+                        JavaClass target = dependency.getTargetClass();
+                        String targetModule = moduleOf(target);
+                        boolean crossesModuleBoundary = targetModule != null && !targetModule.equals(itemModule);
+                        boolean touchesInternalLayer = target.getPackageName().contains(".application.")
+                                || target.getPackageName().contains(".infrastructure.");
+                        if (crossesModuleBoundary && touchesInternalLayer) {
+                            events.add(SimpleConditionEvent.violated(item,
+                                    item.getFullName() + " depends on " + target.getFullName()
+                                            + ", an internal (application/infrastructure) class of "
+                                            + "module '" + targetModule + "'"));
+                        }
+                    });
+                }
+            }).because("DDD: business modules are separate bounded contexts; a module's domain "
+                    + "package (ports, model, exceptions) is its public contract, but its "
+                    + "application/infrastructure packages are internal and must not be depended "
+                    + "on by another module. 'common' is intentionally shared, excluded "
+                    + "(CLAUDE.md section 7)");
+
+    private static String moduleOf(JavaClass javaClass) {
+        String marker = "travesia_natural.";
+        String packageName = javaClass.getPackageName();
+        int start = packageName.indexOf(marker);
+        if (start < 0) {
+            return null;
+        }
+        String rest = packageName.substring(start + marker.length());
+        int dot = rest.indexOf('.');
+        String segment = dot < 0 ? rest : rest.substring(0, dot);
+        return "common".equals(segment) || segment.isEmpty() ? null : segment;
+    }
 
     @ArchTest
     static final ArchRule services_should_not_depend_on_adapters =

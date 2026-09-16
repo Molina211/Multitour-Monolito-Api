@@ -22,9 +22,14 @@ catch it.
   1. **Hexagonal:** `domain` packages must not depend on `infrastructure` packages.
   2. **Hexagonal:** `application` classes must depend on `domain` only through
      `*Port` interfaces, never directly on `*Adapter` classes.
-  3. **DDD:** internal classes of one module's `domain`/`application` packages must
-     not be imported by another module (bounded-context isolation); only public
-     contracts (ports, DTOs) may cross.
+  3. **DDD:** a module's `application`/`infrastructure` classes (internal
+     implementation) must not be depended on by another module (bounded-context
+     isolation). A module's `domain` package (ports, model, exceptions) is its public
+     contract and may be depended on freely — verified against this codebase's actual
+     convention while implementing: every current cross-module dependency from
+     `reservations` into `tenants` goes through `tenants.domain.*` (ports, `Tenant`,
+     `Membership`, exceptions), never `tenants.application.*` or
+     `tenants.infrastructure.*`.
   4. **SOLID-DIP:** `*Service` classes (application layer) depend only on `*Port`
      interfaces, never on concrete `*Adapter` implementations.
   5. **Multitenancy (INV-TEN-001):** `Reservation` and `Membership` must declare a
