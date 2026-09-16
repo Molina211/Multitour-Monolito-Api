@@ -26,6 +26,14 @@ class ArchitectureRulesTest {
                     .because("Hexagonal architecture: domain must not depend on infrastructure "
                             + "(CLAUDE.md section 7)");
 
-    // Remaining rules added in T04-T07.
+    @ArchTest
+    static final ArchRule application_should_not_depend_on_adapters =
+            noClasses()
+                    .that().resideInAPackage("..application..")
+                    .should().dependOnClassesThat().haveSimpleNameEndingWith("Adapter")
+                    .because("Hexagonal architecture: application must depend on ports (*Port), "
+                            + "never directly on adapters (*Adapter) (CLAUDE.md section 7)");
+
+    // Remaining rules added in T05-T07.
 
 }
