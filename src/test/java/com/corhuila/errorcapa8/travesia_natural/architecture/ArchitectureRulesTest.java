@@ -2,6 +2,10 @@ package com.corhuila.errorcapa8.travesia_natural.architecture;
 
 import com.tngtech.archunit.core.importer.ImportOption;
 import com.tngtech.archunit.junit.AnalyzeClasses;
+import com.tngtech.archunit.junit.ArchTest;
+import com.tngtech.archunit.lang.ArchRule;
+
+import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.noClasses;
 
 /**
  * Automated architecture conformance tests for the non-negotiable standards in
@@ -14,6 +18,14 @@ import com.tngtech.archunit.junit.AnalyzeClasses;
 )
 class ArchitectureRulesTest {
 
-    // Rules added in T03-T07.
+    @ArchTest
+    static final ArchRule domain_should_not_depend_on_infrastructure =
+            noClasses()
+                    .that().resideInAPackage("..domain..")
+                    .should().dependOnClassesThat().resideInAPackage("..infrastructure..")
+                    .because("Hexagonal architecture: domain must not depend on infrastructure "
+                            + "(CLAUDE.md section 7)");
+
+    // Remaining rules added in T04-T07.
 
 }
