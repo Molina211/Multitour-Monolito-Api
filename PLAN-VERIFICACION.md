@@ -3547,3 +3547,57 @@ levantó los 3 contenedores: `multitour-postgres` y `multitour-backend` en estad
 devolvió `{"groups":["liveness","readiness"],"status":"UP"}` (sin detalle de
 componentes). `/actuator/info` devolvió `{}` (`200`). Frontend respondió `200` en
 `localhost:8080`. Los 6 criterios de aceptación de la spec 028 quedan cumplidos.
+
+## 029 — ArchUnit architecture conformance tests
+
+Corresponde a `specs/029-archunit-architecture-tests/`. Surgió de una revisión de
+automatizaciones de Claude Code: los no negociables de CLAUDE.md §7 (Hexagonal, DDD,
+SOLID-DIP) y la invariante de multitenencia INV-TEN-001 solo se verificaban leyendo
+código a mano — sin garantía automática ni permanente.
+
+### 1. Compilación
+
+```bash
+./mvnw compile
+```
+
+Sin errores tras agregar `archunit-junit5` (scope test) al `pom.xml`.
+
+### 2. Correr solo las reglas de arquitectura
+
+```bash
+./mvnw test -Dtest=ArchitectureRulesTest
+```
+
+Se esperan las 5 reglas en verde: Hexagonal ×2 (`domain` no depende de
+`infrastructure`; `application` no depende de `*Adapter`), DDD (un módulo no depende
+del `application`/`infrastructure` interno de otro módulo — su `domain`, que es el
+contrato público, sí puede cruzar), SOLID-DIP (`*Service` no depende de `*Adapter`), y
+multitenencia (`Reservation`/`Membership` declaran `tenantId`).
+
+### 3. Violación deliberada (criterio de aceptación)
+
+Se agregó temporalmente en `Reservation.java` un campo apuntando a
+`ReservationRepositoryAdapter` (clase de `infrastructure`), se confirmó que
+`domain_should_not_depend_on_infrastructure` falla con el mensaje esperado, y se
+revirtió sin comitear (`git checkout --`).
+
+### 4. Suite completa
+
+```bash
+./mvnw test
+```
+
+---
+
+Ejecutado el 2026-09-16. Las 5 reglas ArchUnit pasan contra el código actual. La
+primera versión de la regla DDD fallaba por diseño incorrecto: trataba todo el módulo
+`tenants` (incluido su `domain`, el contrato público) como interno; se corrigió para
+que solo `application`/`infrastructure` cuenten como internos, verificado contra el uso
+real de `reservations` → `tenants` (siempre vía `tenants.domain.*`, nunca
+`tenants.application.*`/`tenants.infrastructure.*`). Suite completa: 380 tests, 0
+failures, 1 error (`TravesiaNaturalApplicationTests.contextLoads`, pre-existente y no
+relacionado — requiere el contenedor Postgres de desarrollo corriendo, no levantado en
+esta corrida). La regla de multitenencia se corrigió para apuntar a `Membership`, no a
+`Customer` (nombre conceptual de CLAUDE.md §5/Docs sin clase homónima en código). Los 5
+criterios de aceptación de la spec 029 quedan cumplidos.
